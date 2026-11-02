@@ -1,0 +1,878 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   PrintMD: app chrome styles
+   Template styles are NOT here: each template manages its own CSS.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── CSS Custom Properties (light theme) ──────────────────────────────────── */
+
+:root {
+    --bg: #ffffff;
+    --surface: #f6f7f9;
+    --toolbar-bg: #ffffff;
+    --border: #e7e9ee;
+    --text: #1f2430;
+    --text-muted: #5f6670;       /* 4.5:1 or more on --bg, --surface and --canvas */
+    --accent: #4f46e5;           /* links, focus rings, selected tab text */
+    --accent-fill: #4f46e5;      /* filled backgrounds under white text */
+    --control-border: #868c96;   /* text inputs and selects: 3:1 on --bg and --surface */
+    --ok: #15803d;
+    --danger: #c53030;
+    --editor-bg: #ffffff;
+    --preview-bg: #ffffff;
+    --canvas: #eceef2;
+    --shadow: rgba(20,20,40,.08);
+
+    --toolbar-nav-height: 50px;
+    --toolbar-fmt-height: 42px;
+    --footer-height: 32px;
+    --divider-width: 5px;
+    --radius: 4px;
+    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    /* Source Code Pro and the symbol fallback: vendored (js/fonts.js), their @font-face rules come with the template styles. */
+    --font-mono: 'Source Code Pro', 'Noto Sans Symbols 2', 'Noto Sans Symbols', 'SFMono-Regular', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+    --transition: 150ms ease;
+}
+
+/* ── Dark theme ───────────────────────────────────────────────────────────── */
+
+[data-theme="dark"] {
+    --bg: #15161a;
+    --surface: #1c1e24;
+    --toolbar-bg: #15161a;
+    --border: #2a2d35;
+    --text: #e8eaed;
+    --text-muted: #9aa0aa;
+    --accent: #7c83ff;
+    --accent-fill: #5558e8;      /* #7c83ff under white text is only 3.2:1 */
+    --control-border: #6b717c;
+    --ok: #4ade80;
+    --danger: #f87171;
+    --editor-bg: #15161a;
+    --preview-bg: #1c1e24;
+    --canvas: #0f1013;
+    --shadow: rgba(0,0,0,.4);
+}
+
+/* ── Reset / base ─────────────────────────────────────────────────────────── */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* ── Shared toolbar base ──────────────────────────────────────────────────── */
+
+#toolbar-nav,
+#toolbar-format {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 16px;
+    background: var(--toolbar-bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 10;
+}
+
+/* ── Row 1: Nav bar ───────────────────────────────────────────────────────── */
+
+#toolbar-nav {
+    height: var(--toolbar-nav-height);
+    z-index: 20; /* above the format row so dropdown menus aren't clipped by it */
+}
+
+.app-title {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.toolbar-spacer {
+    flex: 1;
+}
+
+/* ── Row 2: Formatting bar ────────────────────────────────────────────────── */
+
+#toolbar-format {
+    height: var(--toolbar-fmt-height);
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+#toolbar-format::-webkit-scrollbar {
+    display: none;
+}
+
+/* ── Toolbar groups ───────────────────────────────────────────────────────── */
+
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.toolbar-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    padding: 0 2px 0 6px;
+    user-select: none;
+}
+
+/* ── Toolbar separator ────────────────────────────────────────────────────── */
+
+.toolbar-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+    flex-shrink: 0;
+    margin: 0 3px;
+}
+
+/* ── All toolbar buttons (nav + format) ───────────────────────────────────── */
+
+#toolbar-nav button,
+#toolbar-format button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background var(--transition), border-color var(--transition);
+    line-height: 1;
+}
+
+#toolbar-nav button:hover,
+#toolbar-format button:hover {
+    background: var(--surface);
+}
+
+#toolbar-nav button:active,
+#toolbar-format button:active {
+    background: var(--border);
+}
+
+/* Icon-only buttons */
+.btn-icon {
+    min-width: 30px;
+    padding: 0 6px !important;
+    border-radius: 7px;
+}
+
+/* Primary CTA: Export */
+.btn-primary {
+    background: var(--accent-fill) !important;
+    color: #fff !important;
+    border-color: transparent !important;
+    border-radius: 7px;
+    font-weight: 600;
+    font-size: 12px !important;
+}
+
+.btn-primary:hover {
+    opacity: 0.92;
+}
+
+/* Theme toggle */
+#btn-theme {
+    font-size: 15px;
+    border: 1px solid transparent !important;
+    background: transparent !important;
+    border-radius: 7px;
+}
+
+#btn-theme:hover {
+    background: var(--surface) !important;
+}
+
+/* ── Template select ──────────────────────────────────────────────────────── */
+
+#template-select,
+#export-paper-size,
+#export-orientation,
+#export-format {
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--control-border);
+    border-radius: 7px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: border-color var(--transition);
+}
+
+#template-select:hover,
+#export-paper-size:hover,
+#export-orientation:hover,
+#export-format:hover {
+    border-color: var(--text);
+}
+
+#template-select:focus-visible,
+#export-paper-size:focus-visible,
+#export-orientation:focus-visible,
+#export-format:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+/* ── Formatting buttons ───────────────────────────────────────────────────── */
+
+/* Heading buttons: slightly wider, semi-bold */
+.btn-heading {
+    font-weight: 700;
+    font-size: 12px !important;
+    min-width: 30px;
+    padding: 0 7px !important;
+    color: var(--text-muted);
+}
+
+.btn-heading:hover {
+    color: var(--text);
+}
+
+/* Mono-styled buttons (inline code, code block) */
+.btn-mono {
+    font-family: var(--font-mono) !important;
+    font-size: 11px !important;
+    letter-spacing: -0.01em;
+}
+
+/* Code block button: slightly accented so it stands out */
+.btn-code-block {
+    background: var(--surface) !important;
+    font-weight: 700;
+    padding: 0 10px !important;
+}
+
+/* ── Main split pane ──────────────────────────────────────────────────────── */
+
+#main {
+    display: flex;
+    flex-direction: row;
+    height: calc(100vh - var(--toolbar-nav-height) - var(--toolbar-fmt-height) - var(--footer-height));
+    overflow: hidden;
+}
+
+/* Editor pane */
+#editor-pane {
+    width: 50%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--editor-bg);
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+}
+
+#editor {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    padding: 24px 28px;
+    border: none;
+    resize: none;
+    background: var(--editor-bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 15px;
+    line-height: 1.65;
+    tab-size: 2;
+    overflow-y: auto;
+    transition: background var(--transition), color var(--transition);
+}
+
+/* Inset, so the pane's overflow does not clip it */
+#editor:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+#editor::placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Divider */
+#divider {
+    width: var(--divider-width);
+    flex-shrink: 0;
+    background: var(--border);
+    cursor: col-resize;
+    position: relative;
+    z-index: 5;
+    transition: background var(--transition);
+}
+
+#divider:hover,
+#divider:active,
+#divider:focus-visible {
+    background: var(--accent);
+}
+
+#divider:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+#preview-pane:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+/* Preview pane: renders page cards on a soft canvas background */
+#preview-pane {
+    width: 50%;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 24px;
+    background: var(--canvas);
+    transition: background var(--transition);
+}
+
+#preview {
+    min-height: 100%;
+    /* Rendered documents are untrusted: paint containment makes #preview the
+       containing block for fixed/absolute content and clips it, so a document
+       cannot overlay the toolbars, editor or dialogs. */
+    contain: paint;
+}
+
+.preview-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 200px;
+    color: var(--text-muted);
+    font-size: 14px;
+    font-style: italic;
+}
+
+/* Page card: matches the screen page card in js/print-document.js */
+.preview-page,
+#preview-pane .preview-page {
+    background: #ffffff;
+    width: 100%;
+    max-width: var(--preview-page-width, 794px);
+    margin: 0 auto 20px;
+    padding: 60px;
+    border-radius: 4px;
+    box-shadow: 0 2px 12px var(--shadow);
+    box-sizing: border-box;
+}
+
+/* Cover card: no inner padding, the cover handles its own layout and runs to the page edge, as in the PDF.
+   As specific as the page card rule above (an id), or that rule's padding wins. */
+.preview-page-cover,
+#preview-pane .preview-page-cover {
+    padding: 0;
+    overflow: hidden;
+    container-type: inline-size;
+}
+
+/* A cover is exactly as tall as its page, in both orientations, as in the PDF (where the template's cover is
+   given the page height): a height, not a min-height, because a cover that lays itself out against the page
+   (percent heights, a size container) collapses to its content on screen otherwise. 100cqw is the card's own
+   width, so the height follows the card when the pane is narrower than the page. --preview-page-aspect is
+   the page's height to width (A4 portrait 297/210, landscape 210/297, Slide 142.9/254), set in js/app.js. */
+#preview-pane .preview-page-cover .cover-page {
+    height: calc(100cqw * var(--preview-page-aspect, 1.4142));
+    min-height: 0;
+    box-sizing: border-box;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
+#footer {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    height: var(--footer-height);
+    padding: 0 16px;
+    background: var(--toolbar-bg);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.footer-sep {
+    margin: 0 8px;
+    opacity: 0.5;
+}
+
+/* Autosave flash: green for two seconds, then back to the muted colour */
+#autosave-status {
+    transition: color 0.3s;
+}
+
+#autosave-status.autosave-flash {
+    color: var(--ok);
+}
+
+/* A write failed: stays until the next successful save */
+#autosave-status.autosave-error {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+/* ── Scrollbars (webkit) ─────────────────────────────────────────────────── */
+
+#editor::-webkit-scrollbar,
+#preview-pane::-webkit-scrollbar {
+    width: 8px;
+}
+
+#editor::-webkit-scrollbar-track,
+#preview-pane::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#editor::-webkit-scrollbar-thumb,
+#preview-pane::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+#editor::-webkit-scrollbar-thumb:hover,
+#preview-pane::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* ── Responsive: stack panes below 768px ──────────────────────────────────── */
+
+@media (max-width: 768px) {
+    #main {
+        flex-direction: column;
+        height: calc(100vh - var(--toolbar-nav-height) - var(--toolbar-fmt-height) - var(--footer-height));
+    }
+
+    #editor-pane {
+        width: 100% !important;
+        flex: 1 1 50%;
+        height: 50%;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+    }
+
+    #divider {
+        display: none;
+    }
+
+    #preview-pane {
+        width: 100% !important;
+        flex: 1 1 50%;
+        height: 50%;
+        padding: 16px;
+    }
+
+    #toolbar-format {
+        gap: 2px;
+        padding: 0 8px;
+    }
+
+    .btn-heading {
+        display: none;
+    }
+
+    .app-title {
+        font-size: 13px;
+    }
+}
+
+/* ── Google Drive import modal ───────────────────────────────────────────── */
+
+#drive-modal-backdrop,
+.app-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .45);
+    z-index: 1000;
+}
+
+#drive-modal-panel,
+.app-modal-panel {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1001;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    width: min(480px, 92vw);
+    box-shadow: 0 10px 30px var(--shadow);
+}
+
+#drive-modal-panel h2,
+.app-modal-panel h2 {
+    margin: 0 0 16px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+#drive-tab-bar {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+}
+
+.drive-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+    margin-bottom: -1px;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.drive-tab:hover {
+    color: var(--text);
+}
+
+.drive-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 500;
+}
+
+.drive-help {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 0 0 14px;
+    line-height: 1.5;
+}
+
+.drive-help a {
+    color: var(--accent);
+}
+
+#drive-modal-panel label {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin: 12px 0 4px;
+}
+
+.drive-label-hint {
+    font-weight: 400;
+    font-style: italic;
+}
+
+#drive-modal-panel input[type="url"],
+#drive-modal-panel input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 10px;
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius);
+    background: var(--editor-bg);
+    color: var(--text);
+    font-size: 13px;
+    font-family: var(--font-mono);
+}
+
+#drive-modal-panel input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.drive-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+/* Destructive action sits apart, on the left */
+.drive-actions .drive-btn-clear {
+    margin-right: auto;
+}
+
+/* ── Focus styles for accessibility ──────────────────────────────────────── */
+
+/* Every keyboard-focusable control: a 2px ring in the accent colour, which has
+   3:1 or more against the toolbar, sidebar and dialog backgrounds in both themes. */
+:focus-visible,
+#toolbar-nav button:focus-visible,
+#toolbar-format button:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
+}
+
+/* Hidden on screen, still read by screen readers */
+.visually-hidden {
+    position: absolute !important;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Skip link: off screen until it has keyboard focus */
+.skip-link {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 2000;
+    padding: 8px 14px;
+    border-radius: 7px;
+    background: var(--accent-fill);
+    color: #fff;
+    font-weight: 600;
+    text-decoration: none;
+    transform: translateY(-200%);
+}
+
+.skip-link:focus {
+    transform: none;
+}
+
+/* Reduced motion: no transitions, animations or smooth scrolling */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        transition-duration: 0s !important;
+        animation-duration: 0s !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ── App logo in nav bar ──────────────────────────────────────────────────── */
+
+#app-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    text-decoration: none;
+}
+
+#app-logo svg {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+#sidebar { flex: 0 0 220px; width: 220px; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--border); background: var(--surface); transition: flex-basis .15s ease, width .15s ease; }
+#sidebar.collapsed { flex-basis: 40px; width: 40px; }
+#sidebar.collapsed .sidebar-title, #sidebar.collapsed .sidebar-actions, #sidebar.collapsed .doc-filter, #sidebar.collapsed #doc-list, #sidebar.collapsed .doc-more { display: none; }
+/* Show more: under the list, so it stays in view while the list scrolls */
+.doc-more { flex: 0 0 auto; margin: 4px 10px 10px; }
+.doc-more[hidden] { display: none; }
+.sidebar-head { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.sidebar-title { font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.sidebar-actions { display: flex; gap: 6px; padding: 8px 10px 6px; }
+.btn-mini { font-size: 11px; padding: 4px 10px; cursor: pointer; border: 1px solid var(--border); background: var(--bg); color: var(--text-muted); border-radius: 6px; font-weight: 500; transition: background var(--transition), color var(--transition), border-color var(--transition); }
+.btn-mini:hover { background: var(--surface); color: var(--text); border-color: var(--text-muted); }
+#doc-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+.doc-item { display: flex; align-items: center; gap: 0; padding: 0; border-radius: 6px; cursor: pointer; font-size: 12px; line-height: 1.4; border-left: 3px solid transparent; }
+.doc-item:hover { background: rgba(127,127,127,.10); }
+.doc-item.active { background: var(--accent-fill); color: #fff; border-left-color: rgba(255,255,255,0.7); }
+/* The item's open button carries the old item padding, so it fills the row */
+.doc-open { display: flex; align-items: center; flex: 1; min-width: 0; padding: 7px 10px 7px 8px; margin: 0; border: none; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.doc-open:focus-visible { outline-offset: 1px; }
+/* The open row is filled with the accent, so an accent ring inside it would vanish:
+   its open button adds a white ring inside the row (the accent ring outside stays
+   against the list) and its delete button's ring is white. 5.3:1 or more on the fill. */
+.doc-item.active .doc-open:focus-visible { box-shadow: inset 0 0 0 2px #fff; }
+.doc-item.active .doc-del:focus-visible { outline-color: #fff; }
+.doc-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-time { flex: 0 0 auto; font-size: 10px; color: var(--text-muted); margin-left: auto; padding-left: 6px; }
+.doc-item.active .doc-time { color: rgba(255,255,255,0.9); }
+
+.menu { position: relative; display: inline-block; }
+.menu-trigger[aria-expanded="true"] { background: rgba(127,127,127,.12); }
+.menu-list { position: absolute; top: calc(100% + 4px); left: 0; z-index: 50; min-width: 170px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 30px var(--shadow); padding: 4px; display: flex; flex-direction: column; gap: 1px; }
+.menu-list[hidden] { display: none; }
+.menu-list button { display: block; width: 100%; text-align: left; padding: 6px 10px; border: none; background: transparent; color: inherit; font-size: 13px; cursor: pointer; border-radius: 6px; }
+.menu-list button:hover { background: rgba(127,127,127,.12); }
+.modal-close { position: absolute; top: 10px; right: 12px; border: none; background: transparent; font-size: 22px; line-height: 1; cursor: pointer; color: inherit; opacity: .6; }
+.modal-close:hover { opacity: 1; }
+
+#main.view-editor #preview-pane, #main.view-editor #divider { display: none; }
+#main.view-editor #editor-pane { width: 100%; border-right: none; }
+#main.view-preview #editor-pane, #main.view-preview #divider { display: none; }
+#main.view-preview #preview-pane { width: 100%; }
+.menu-list button.active-view { font-weight: 700; }
+
+.popover { position: absolute; z-index: 60; min-width: 240px; max-width: 320px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 30px var(--shadow); padding: 14px 16px; font-size: 13px; }
+.popover[hidden] { display: none; }
+.popover-close { position: absolute; top: 6px; right: 8px; border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; color: inherit; opacity: .6; }
+.popover-close:hover { opacity: 1; }
+.popover h3 { margin: 0 0 4px; font-size: 14px; }
+.popover .ti-meta { color: var(--text-muted, #666); font-size: 12px; margin-bottom: 8px; }
+.popover .ti-desc { margin: 8px 0; }
+.popover .ti-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
+.popover .ti-swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.2); display: inline-block; }
+.doc-item { position: relative; }
+.doc-title { min-width: 0; }
+.doc-del { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); opacity: 0; border: none; background: transparent; color: inherit; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 5px; border-radius: 5px; }
+.doc-item:hover .doc-time, .doc-item:focus-within .doc-time { opacity: 0; }   /* make room: fade the timestamp */
+/* Shown at .9: the × reaches 4.5:1 on every row, the accent-filled open row included */
+.doc-item:hover .doc-del, .doc-item:focus-within .doc-del { opacity: .9; }
+.doc-del:hover, .doc-del:focus-visible { opacity: 1 !important; background: rgba(127,127,127,.25); }
+.doc-item.active .doc-del { color: #fff; }
+/* Touch screens have no hover: the delete button always shows, the time moves left of it */
+@media (hover: none) and (pointer: coarse) {
+    .doc-del { opacity: .9; }
+    .doc-open { padding-right: 30px; }
+}
+
+/* ── Command Palette ───────────────────────────────────────────────────────── */
+
+.cmdk { position: fixed; inset: 0; z-index: 100; display: flex; align-items: flex-start; justify-content: center; }
+.cmdk[hidden] { display: none; }
+.cmdk-backdrop { position: absolute; inset: 0; background: rgba(10,12,20,.35); }
+.cmdk-panel { position: relative; margin-top: 12vh; width: min(560px, 92vw); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 20px 60px var(--shadow); overflow: hidden; }
+#cmdk-input { width: 100%; box-sizing: border-box; border: none; padding: 16px 18px; font-size: 15px; background: transparent; color: var(--text); border-bottom: 1px solid var(--border); }
+#cmdk-list { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow-y: auto; }
+.cmdk-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--text); }
+.cmdk-item .cmdk-cat { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.cmdk-item.sel, .cmdk-item:hover { background: var(--surface); }
+.cmdk-item.sel { box-shadow: inset 0 0 0 1px var(--accent); }
+#cmdk-input:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cmdk-empty { padding: 14px; color: var(--text-muted); font-size: 13px; text-align: center; }
+.doc-filter { display: block; margin: 0 10px 8px; padding: 5px 9px; border: 1px solid var(--control-border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 12px; width: calc(100% - 20px); box-sizing: border-box; }
+.doc-filter:focus { border-color: var(--accent); }
+.doc-filter:focus-visible { outline-offset: 1px; }
+
+/* ── In-app modals (File changed on disk, PDF preflight, PDF password, import questions): same look as the Drive modal ── */
+
+.app-modal[hidden] { display: none; }
+.app-modal .app-modal-list { margin: 0 0 16px; padding-left: 20px; }
+.app-modal .app-modal-list[hidden] { display: none; }
+.app-modal .drive-help { font-size: 13px; color: var(--text); }
+.app-modal .drive-actions { flex-wrap: wrap; }
+.app-modal .drive-actions button { height: 30px; padding: 0 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: 12px; cursor: pointer; }
+.app-modal .drive-actions button:hover { background: var(--surface); }
+.app-modal .drive-actions .btn-danger { color: var(--danger); border-color: var(--danger); }
+.app-modal .app-modal-input { width: 100%; box-sizing: border-box; margin: 0 0 14px; padding: 7px 10px; border: 1px solid var(--control-border); border-radius: var(--radius); background: var(--editor-bg); color: var(--text); font-size: 13px; }
+.app-modal .app-modal-input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+/* ── Page options dialog (js/page-options-dialog.js) ── */
+.page-options-panel .po-group { border: 1px solid var(--border); border-radius: var(--radius); margin: 0 0 12px; padding: 8px 12px 10px; }
+.page-options-panel legend { font-size: 12px; font-weight: 600; color: var(--text); padding: 0 4px; }
+.page-options-panel .po-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 6px 0 10px; font-size: 13px; color: var(--text); }
+.page-options-panel .po-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); margin: 4px 0; }
+.page-options-panel .app-modal-input.po-number { width: 6em; margin: 0; }
+.page-options-panel select { font-size: 13px; padding: 4px 6px; border: 1px solid var(--control-border); border-radius: var(--radius); background: var(--editor-bg); color: var(--text); }
+.page-options-panel .po-number:disabled, .page-options-panel select:disabled { opacity: 0.55; }
+.page-options-panel [aria-invalid="true"] { border-color: var(--danger); }
+.page-options-panel .po-error { min-height: 1.2em; margin: 0 0 10px; font-size: 12px; color: var(--danger); }
+.page-options-panel .po-error:empty { margin: 0; }
+/* The toolbar button: a dot when the document has page options of its own. */
+.btn-page-options { position: relative; }
+.btn-page-options.active::after { content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+/* One continuous page: the cover and body cards join into one tall card, as the PDF prints them. */
+#preview-pane.continuous .preview-page-cover { margin-bottom: 0; border-radius: 4px 4px 0 0; }
+#preview-pane.continuous .preview-page-cover + .preview-page { border-radius: 0 0 4px 4px; }
+/* The cover takes its own height there, as in the PDF, so a wide, short page does not cut it; a cover laid out
+   against the page (a size container) keeps at least the page's height, as the PDF gives it. As specific as the
+   page-height rule for covers above, and later, so it wins. */
+#preview-pane.continuous .preview-page-cover .cover-page {
+    height: auto;
+    min-height: calc(100cqw * var(--preview-page-aspect, 1.4142));
+}
+
+/* ── Persistent banner (storage unavailable) ──────────────────────────────── */
+
+.app-banner { position: fixed; right: 16px; bottom: calc(var(--footer-height) + 12px); z-index: 900; display: flex; align-items: center; gap: 10px; max-width: min(420px, calc(100vw - 32px)); padding: 10px 12px 10px 14px; background: var(--bg); color: var(--text); border: 1px solid var(--danger); border-left-width: 4px; border-radius: 8px; box-shadow: 0 10px 30px var(--shadow); font-size: 13px; }
+.app-banner[hidden] { display: none; }
+/* Waiting, not failing: the accent instead of the danger border */
+.app-banner.upgrade-wait { border-color: var(--accent); }
+.upgrade-wait-count { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.app-banner-close { border: none; background: transparent; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; opacity: .6; padding: 2px 4px; border-radius: 5px; }
+.app-banner-close:hover { opacity: 1; background: rgba(127,127,127,.15); }
+
+/* ── Hosted copy notice (shown by js/app.js when js/edition.js switches it on) ── */
+
+/* A card at the bottom left, like the banners on the right: fixed, so it never shifts the
+   panes or the footer, and clear of the toolbars (a bar across the top would cover New and
+   Open). The storage banner sits at the bottom right, so the two never overlap. */
+.hosted-notice {
+    position: fixed;
+    left: 16px;
+    bottom: calc(var(--footer-height) + 12px);
+    z-index: 900;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: min(520px, calc(100vw - 32px));
+    padding: 10px 12px 10px 14px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px var(--shadow);
+    font-size: 13px;
+}
+
+/* The text takes the room left over, so the button sits at the right. */
+.hosted-notice span {
+    flex: 1;
+}
+
+.hosted-notice[hidden] {
+    display: none;
+}
+
+/* ── Drop a file to open it ───────────────────────────────────────────────── */
+
+body.drag-files::after { content: 'Drop to open as a new document'; position: fixed; inset: 12px; z-index: 950; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--bg) 82%, transparent); color: var(--accent); font-size: 15px; font-weight: 600; pointer-events: none; }
+

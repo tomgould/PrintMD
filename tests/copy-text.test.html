@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Copy HTML Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        #app { width: 1400px; height: 900px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>js/copy-text.js and Copy HTML: the Clipboard API, the textarea fallback, and a clear failure</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<button id="opener" type="button">opener</button>
+<iframe id="app" title="app under test"></iframe>
+<script type="module">
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+    import {copyText} from '../js/copy-text.js';
+
+    const h = createHarness('COPYTEXT');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    async function waitFor(fn, what, ms = 8000) {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+            try { if (fn()) return; } catch (_e) { /* not ready */ }
+            await sleep(20);
+        }
+        throw new Error('timed out waiting for ' + what);
+    }
+
+    /** A stand-in for document.execCommand that records what was selected when it ran. */
+    function stubExec(result) {
+        const real = document.execCommand;
+        const seen = [];
+        document.execCommand = (cmd) => {
+            const el = document.activeElement;
+            seen.push({cmd, selected: el && el.tagName === 'TEXTAREA' ? el.value.slice(el.selectionStart, el.selectionEnd) : null});
+            if (result instanceof Error) throw result;
+            return result;
+        };
+        return {seen, restore: () => { document.execCommand = real; }};
+    }
+
+    h.test('with the Clipboard API: writeText gets the text, no fallback runs', async () => {
+        const written = [];
+        const exec = stubExec(true);
+        try {
+            const ok = await copyText('<p>hi</p>', {clipboard: {writeText: async (t) => { written.push(t); }}});
+            assert(ok === true, 'reported copied');
+            assert(written.length === 1 && written[0] === '<p>hi</p>', 'writeText called with the text');
+            assert(exec.seen.length === 0, 'execCommand not used');
+        } finally { exec.restore(); }
+    });
+
+    h.test('without navigator.clipboard (plain http): a hidden textarea is selected and copied, then removed', async () => {
+        const opener = document.getElementById('opener');
+        opener.focus();
+        const exec = stubExec(true);
+        try {
+            const ok = await copyText('<h1>Example Co</h1>', {clipboard: undefined});
+            assert(ok === true, 'reported copied');
+            assert(exec.seen.length === 1 && exec.seen[0].cmd === 'copy', 'copy command run once');
+            assert(exec.seen[0].selected === '<h1>Example Co</h1>', 'the whole text was selected: ' + exec.seen[0].selected);
+            assert(!document.querySelector('body > textarea'), 'textarea removed');
+            assert(document.activeElement === opener, 'focus returned to where it was');
+        } finally { exec.restore(); }
+    });
+
+    h.test('a refused writeText falls back to the textarea', async () => {
+        const exec = stubExec(true);
+        try {
+            const ok = await copyText('x', {clipboard: {writeText: async () => { throw new DOMException('denied', 'NotAllowedError'); }}});
+            assert(ok === true && exec.seen.length === 1, 'fallback used');
+        } finally { exec.restore(); }
+    });
+
+    h.test('when both ways fail it says so (false), and leaves nothing behind', async () => {
+        for (const result of [false, new Error('not supported')]) {
+            const exec = stubExec(result);
+            try {
+                const ok = await copyText('x', {clipboard: null});
+                assert(ok === false, 'reported not copied for ' + result);
+                assert(!document.querySelector('body > textarea'), 'textarea removed');
+            } finally { exec.restore(); }
+        }
+    });
+
+    // In the app: Copy HTML on a page where navigator.clipboard does not exist.
+    let win, doc;
+    const toastText = () => { const t = doc.querySelector('body > #toast'); return t ? t.textContent : ''; };
+
+    async function bootWithoutClipboard() {
+        await resetStorage();
+        // A short first document instead of the long welcome one (js/store.js migrateFromLocalStorage): a lighter boot.
+        localStorage.setItem('printmd-state', JSON.stringify({source: '# Example Co copy test\n\nSome text to copy.'}));
+        const frame = document.getElementById('app');
+        frame.src = '../index.html';
+        await new Promise(res => frame.addEventListener('load', res, {once: true}));
+        win = frame.contentWindow;
+        doc = frame.contentDocument;
+        Object.defineProperty(win.navigator, 'clipboard', {value: undefined, configurable: true});
+        await waitFor(() => win.__bd && win.__bd.docManager.currentId != null, 'app boot');
+    }
+
+    h.test('Copy HTML without the Clipboard API copies through the fallback and says copied', async () => {
+        await bootWithoutClipboard();
+        let copied = null;
+        doc.execCommand = (cmd) => {
+            const el = doc.activeElement;
+            if (cmd === 'copy' && el && el.tagName === 'TEXTAREA') copied = el.value;
+            return true;
+        };
+        doc.getElementById('btn-copy-html').click();
+        await waitFor(() => toastText() === 'HTML copied to clipboard', 'copied toast, got: ' + toastText());
+        assert(copied && copied.includes('Example Co copy test'), 'the preview HTML was copied');
+    });
+
+    h.test('Copy HTML that cannot copy at all shows a clear toast and an alert', async () => {
+        doc.execCommand = () => false;
+        doc.getElementById('btn-copy-html').click();
+        await waitFor(() => /^Could not copy the HTML/.test(toastText()), 'failure toast, got: ' + toastText());
+        assert(/https or localhost/.test(toastText()) && /Ctrl\+C/.test(toastText()), 'says what to do: ' + toastText());
+        await waitFor(() => doc.querySelector('body > .sr-alert').textContent === toastText(), 'announced as an alert');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

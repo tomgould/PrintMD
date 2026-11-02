@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html data-theme="light" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client https://apis.google.com; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; font-src 'self'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https://www.googleapis.com https://content.googleapis.com https://docs.google.com https://*.googleusercontent.com https://oauth2.googleapis.com https://accounts.google.com/gsi/; frame-src https://youtube.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://docs.google.com https://accounts.google.com https://content.googleapis.com; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <!--
+      Content-Security-Policy (also applies to the PDF print window, which inherits it):
+      - script-src: our own files plus the Google sign-in and Picker loaders. No
+        'unsafe-inline' and no 'unsafe-eval': index.html has no inline scripts and
+        the print window is driven from js/pdf-export.js.
+      - style-src needs 'unsafe-inline': documents use inline style attributes and
+        the app injects <style> elements (template CSS, print window).
+      - font-src 'self': the brand fonts are vendored in vendor/fonts/ (js/fonts.js).
+      - img-src/media-src allow any https: URL because documents link remote images.
+      - connect-src: Drive/Docs APIs, the Docs export redirect host, token revoke.
+      - frame-src: the iframe allow-list in js/markdown.js plus Google sign-in and Picker.
+    -->
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>PrintMD</title>
+    <meta content="Offline Markdown editor with branded PDF export" name="description">
+    <link href="assets/favicon.svg" rel="icon" type="image/svg+xml">
+
+    <!-- highlight.js theme, vendored locally -->
+    <link href="vendor/highlightjs/atom-one-dark.min.css" rel="stylesheet">
+
+    <!-- App styles -->
+    <link href="css/app.css" rel="stylesheet">
+</head>
+<body>
+
+<a class="skip-link" href="#editor">Skip to editor</a>
+
+<!-- ── Hosted copy notice (shown by js/app.js when js/edition.js switches it on). No id: every id in
+     this file must be reserved in js/markdown.js APP_ELEMENT_IDS, so the app finds the notice by
+     class like the other body-level notices (.upgrade-wait, .sr-status). ── -->
+<div class="hosted-notice" role="note" hidden>
+    <span>This is a hosted copy. For the best results, run it on your own computer: the PDF service only works there, and it makes the best PDFs.</span>
+    <button type="button" class="btn-mini hosted-notice-close" aria-label="Dismiss this notice">Dismiss</button>
+</div>
+
+<header>
+<!-- ── Row 1: Nav / file operations ────────────────────────────────────── -->
+<div aria-label="File and export" id="toolbar-nav" role="group">
+    <!-- App wordmark: swap the SVG content for a logo when one is available -->
+    <span id="app-logo" title="PrintMD">
+      <svg aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"
+           stroke-width="2.2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" x2="8" y1="13" y2="13"/>
+        <line x1="16" x2="8" y1="17" y2="17"/>
+        <line x1="10" x2="8" y1="9" y2="9"/>
+      </svg>
+      <span class="app-title">PrintMD</span>
+    </span>
+
+    <div class="toolbar-sep"></div>
+
+    <div class="toolbar-group">
+        <button id="btn-new" title="New document  (Alt+N)">New</button>
+        <button id="btn-open" title="Open .md file">Open</button>
+        <button id="btn-save" title="Save .md  (Ctrl+S)">Save</button>
+        <div class="menu">
+            <button class="menu-trigger" id="menu-import-trigger" aria-controls="menu-import-list" aria-haspopup="menu" aria-expanded="false">Import ▾</button>
+            <div aria-labelledby="menu-import-trigger" class="menu-list" id="menu-import-list" role="menu" hidden>
+                <button id="btn-import-pdf" role="menuitem" title="Import PDF and convert to Markdown">PDF…</button>
+                <button id="btn-import-docx" role="menuitem" title="Import Word document (.docx)">Word…</button>
+                <button id="btn-import-html" role="menuitem" title="Import HTML file">HTML…</button>
+                <button id="btn-import-epub" role="menuitem" title="Import EPUB ebook">EPUB…</button>
+                <button id="btn-import-drive" role="menuitem" title="Import from Google Drive">Google Drive…</button>
+            </div>
+        </div>
+        <div class="menu">
+            <button class="menu-trigger" id="menu-more-trigger" aria-controls="menu-more-list" aria-haspopup="menu" aria-expanded="false" aria-label="More" title="More">⋯</button>
+            <div aria-labelledby="menu-more-trigger" class="menu-list" id="menu-more-list" role="menu" hidden>
+                <button id="btn-copy-html" role="menuitem" title="Copy rendered HTML to clipboard">Copy HTML</button>
+                <button id="btn-reset" role="menuitem" title="Reload sample document">Reset to sample…</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- hidden file inputs -->
+    <input accept=".md,.markdown,.txt" id="file-input" style="display:none" type="file">
+    <input accept="image/*" id="image-input" style="display:none" type="file">
+    <input accept=".pdf" id="pdf-input" style="display:none" type="file">
+    <input accept=".docx,.doc" id="docx-input" style="display:none" type="file">
+    <input accept=".html,.htm" id="html-input" style="display:none" type="file">
+    <input accept=".epub" id="epub-input" style="display:none" type="file">
+
+    <div class="toolbar-spacer"></div>
+
+    <div class="toolbar-group">
+        <select id="template-select" title="Choose template"></select>
+        <button aria-controls="template-info-popover" aria-expanded="false" aria-label="Template info" class="btn-icon" id="btn-template-info" title="Template info">ℹ</button>
+    </div>
+
+    <div class="toolbar-sep"></div>
+
+    <div class="menu">
+        <button class="menu-trigger" id="menu-view-trigger" aria-controls="menu-view-list" aria-haspopup="menu" aria-expanded="false" title="View layout">View ▾</button>
+        <div aria-labelledby="menu-view-trigger" class="menu-list" id="menu-view-list" role="menu" hidden>
+            <button data-view="split" role="menuitem">▣ Split</button>
+            <button data-view="editor" role="menuitem">◧ Editor only</button>
+            <button data-view="preview" role="menuitem">◨ Preview only</button>
+        </div>
+    </div>
+
+    <div class="toolbar-group">
+        <label class="toolbar-label" for="export-paper-size">Size</label>
+        <select id="export-paper-size" title="Paper size">
+            <option value="A4">A4</option>
+            <option value="A3">A3</option>
+            <option value="A5">A5</option>
+            <option value="Letter">Letter</option>
+            <option value="Legal">Legal</option>
+            <option value="Slide">Slide 16:9</option>
+            <option value="Custom">Custom size…</option>
+        </select>
+        <label class="toolbar-label" for="export-orientation">Page</label>
+        <select id="export-orientation" title="Page orientation">
+            <option value="portrait">Portrait</option>
+            <option value="landscape">Landscape</option>
+        </select>
+        <button aria-haspopup="dialog" aria-label="Page options" class="btn-icon btn-page-options" id="btn-page-options"
+                title="Page options: custom size, one continuous page, fit to size, margin" type="button">⚙</button>
+        <label class="toolbar-label" for="export-format">As</label>
+        <select id="export-format" title="Export format">
+            <option value="pdf">PDF</option>
+            <option value="docx">Word</option>
+            <option value="pptx">PowerPoint</option>
+        </select>
+        <button class="btn-primary" id="btn-export" title="Export  (Ctrl+P = PDF)">Export</button>
+    </div>
+    <button aria-label="Dark theme" aria-pressed="false" class="btn-icon" id="btn-theme" title="Toggle light / dark">🌙</button>
+</div>
+
+<!-- ── Row 2: Formatting bar ───────────────────────────────────────────── -->
+<div aria-label="Formatting" id="toolbar-format" role="group">
+
+    <!-- Headings -->
+    <div class="toolbar-group">
+        <button aria-label="Heading 1" class="btn-fmt btn-heading" data-fmt="h1" title="Heading 1  (# …)">H1</button>
+        <button aria-label="Heading 2" class="btn-fmt btn-heading" data-fmt="h2" title="Heading 2  (## …)">H2</button>
+        <button aria-label="Heading 3" class="btn-fmt btn-heading" data-fmt="h3" title="Heading 3  (### …)">H3</button>
+        <button aria-label="Heading 4" class="btn-fmt btn-heading" data-fmt="h4" title="Heading 4  (#### …)">H4</button>
+    </div>
+
+    <div class="toolbar-sep"></div>
+
+    <!-- Inline formatting -->
+    <div class="toolbar-group">
+        <button aria-label="Bold" class="btn-fmt" data-fmt="bold" id="btn-bold" title="Bold  (Ctrl+B)"><strong>B</strong></button>
+        <button aria-label="Italic" class="btn-fmt" data-fmt="italic" id="btn-italic" title="Italic  (Ctrl+I)"><em>I</em></button>
+        <button aria-label="Strikethrough" class="btn-fmt" data-fmt="strike" title="Strikethrough"><s>S</s></button>
+        <button aria-label="Inline code" class="btn-fmt btn-mono" data-fmt="code-inline" title="Inline code  (`…`)">`c`</button>
+    </div>
+
+    <div class="toolbar-sep"></div>
+
+    <!-- Block elements -->
+    <div class="toolbar-group">
+        <button aria-label="Code block" class="btn-fmt btn-mono btn-code-block" data-fmt="code-block" title="Code block  (``` … ```)">```
+        </button>
+        <button aria-label="Blockquote" class="btn-fmt" data-fmt="blockquote" title="Blockquote  (> …)">❝</button>
+        <button aria-label="Horizontal rule" class="btn-fmt" data-fmt="hr" title="Horizontal rule  (---)">HR</button>
+    </div>
+
+    <div class="toolbar-sep"></div>
+
+    <!-- Lists -->
+    <div class="toolbar-group">
+        <button aria-label="Bullet list" class="btn-fmt" data-fmt="ul" title="Bullet list  (- item)">• List</button>
+        <button aria-label="Numbered list" class="btn-fmt" data-fmt="ol" title="Numbered list  (1. item)">1. List</button>
+        <button aria-label="Task list" class="btn-fmt" data-fmt="task" title="Task list  (- [ ] item)">☐ Task</button>
+    </div>
+
+    <div class="toolbar-sep"></div>
+
+    <!-- Insert -->
+    <div class="toolbar-group">
+        <button aria-label="Insert link" class="btn-fmt" data-fmt="link" title="Insert link  ([text](url))">Link</button>
+        <button aria-label="Insert image" class="btn-fmt" data-fmt="image" title="Insert image from file">Image</button>
+        <button aria-label="Insert table" class="btn-fmt" data-fmt="table" title="Insert table template">Table</button>
+    </div>
+
+</div>
+</header>
+
+<!-- ── Main split-pane area ─────────────────────────────────────────────── -->
+<div id="main">
+    <nav aria-label="Recent files" id="sidebar">
+        <div class="sidebar-head">
+            <button aria-expanded="true" aria-label="Toggle sidebar" id="sidebar-toggle" class="btn-icon" title="Toggle sidebar">☰</button>
+            <span class="sidebar-title">Recent files</span>
+        </div>
+        <div class="sidebar-actions">
+            <button id="sidebar-new" class="btn-mini">+ New</button>
+            <button id="sidebar-open" class="btn-mini">Open…</button>
+        </div>
+        <label class="visually-hidden" for="doc-filter">Search documents by title</label>
+        <input id="doc-filter" class="doc-filter" type="text" placeholder="Search titles…  (Esc to clear)" autocomplete="off" spellcheck="false">
+        <ul aria-label="Recent files" id="doc-list"></ul>
+        <!-- Shown while older documents (or more matches) remain: js/sidebar.js -->
+        <button class="btn-mini doc-more" hidden type="button">Show more</button>
+    </nav>
+    <main id="editor-pane">
+      <textarea
+              aria-label="Markdown editor"
+              id="editor"
+              placeholder="Start writing Markdown…"
+              readonly
+              spellcheck="true"
+      ></textarea>
+    </main>
+
+    <div aria-controls="editor-pane" aria-label="Resize editor and preview" aria-orientation="vertical"
+         aria-valuemax="80" aria-valuemin="20" aria-valuenow="50" aria-valuetext="Editor 50%" id="divider"
+         role="separator" tabindex="0"></div>
+
+    <aside aria-label="Live preview" id="preview-pane" tabindex="0">
+        <div id="preview"></div>
+    </aside>
+</div>
+
+<!-- ── Footer ───────────────────────────────────────────────────────────── -->
+<footer id="footer">
+    <span id="word-count">0 words</span>
+    <span aria-hidden="true" class="footer-sep">·</span>
+    <span id="read-time">0 min read</span>
+    <span aria-hidden="true" class="footer-sep">·</span>
+    <span id="autosave-status">Autosaved</span>
+</footer>
+
+<!-- ── Screen reader announcements (js/app.js announce()): toasts and save-state changes ── -->
+<div aria-atomic="true" aria-live="polite" class="visually-hidden sr-status" role="status"></div>
+<div aria-atomic="true" class="visually-hidden sr-alert" role="alert"></div>
+
+<!-- ── Vendored dependencies (fully offline) ──────────────────────────── -->
+<script src="vendor/marked/marked.min.js"></script>
+<script src="vendor/dompurify/purify.min.js"></script>
+    <script src="vendor/highlightjs/highlight.min.js"></script>
+    <!-- every other highlight.js language (vendor/highlightjs/README.md) -->
+    <script src="vendor/highlightjs/languages.min.js"></script>
+    <!-- JSZip and PptxGenJS load on the first Word or PowerPoint export (js/import-utils.js
+         loadJSZip, loadPptxGen), PptxGenJS between js/builtins-save.js and js/builtins-restore.js -->
+
+
+<!-- ── Google Drive import modal ───────────────────────────────────────── -->
+<div aria-labelledby="drive-modal-title" aria-modal="true" id="drive-modal" role="dialog" style="display:none">
+    <div id="drive-modal-backdrop"></div>
+    <div id="drive-modal-panel">
+        <button id="drive-modal-close" class="modal-close" title="Close" aria-label="Close">×</button>
+        <h2 id="drive-modal-title">Import from Google Drive</h2>
+
+        <div aria-label="Import method" id="drive-tab-bar" role="tablist">
+            <button aria-controls="drive-tab-url" aria-selected="true" class="drive-tab active" data-tab="url" role="tab">Paste URL</button>
+            <button aria-controls="drive-tab-picker" aria-selected="false" class="drive-tab" data-tab="picker" role="tab" tabindex="-1">Browse Drive</button>
+            <button aria-controls="drive-tab-settings" aria-label="Credentials" aria-selected="false" class="drive-tab" data-tab="settings" role="tab" tabindex="-1">⚙ Credentials</button>
+        </div>
+
+        <!-- Tab: URL -->
+        <div aria-label="Paste URL" class="drive-tab-content" id="drive-tab-url" role="tabpanel">
+            <p class="drive-help">Paste a Google Doc or Drive file URL. Publicly shared documents import without signing
+                in.</p>
+            <input aria-label="Google Doc or Drive file URL" id="drive-url-input" placeholder="https://docs.google.com/document/d/…" spellcheck="false"
+                   type="url">
+            <div class="drive-actions">
+                <button class="btn-secondary" id="drive-btn-cancel">Cancel</button>
+                <button class="btn-primary" id="drive-btn-import-url">Import</button>
+            </div>
+        </div>
+
+        <!-- Tab: Picker -->
+        <div aria-label="Browse Drive" class="drive-tab-content" id="drive-tab-picker" role="tabpanel" style="display:none">
+            <p class="drive-help">Browse and select a file directly from your Google Drive. Requires an API key and
+                Client ID, which you set in the <strong>Credentials</strong> tab.</p>
+            <div class="drive-actions">
+                <button class="btn-secondary" id="drive-btn-cancel-picker">Cancel</button>
+                <button class="btn-primary" id="drive-btn-open-picker">Open Drive Picker</button>
+            </div>
+        </div>
+
+        <!-- Tab: Credentials -->
+        <div aria-label="Credentials" class="drive-tab-content" id="drive-tab-settings" role="tabpanel" style="display:none">
+            <p class="drive-help">Required for private documents and the Drive Picker. <a
+                    href="https://console.cloud.google.com/" rel="noopener" target="_blank">Create a project</a> and
+                enable the Drive API and Picker API.</p>
+            <label for="drive-input-client-id">OAuth Client ID</label>
+            <input id="drive-input-client-id" placeholder="xxxx.apps.googleusercontent.com" spellcheck="false"
+                   type="text">
+            <label for="drive-input-api-key">API Key <span class="drive-label-hint">(Picker only)</span></label>
+            <input id="drive-input-api-key" placeholder="AIza…" spellcheck="false" type="text">
+            <div class="drive-actions">
+                <button class="btn-secondary drive-btn-clear" id="drive-btn-clear-creds"
+                        title="Remove the Client ID and API key saved in this browser">Clear saved Google credentials</button>
+                <button class="btn-secondary" id="drive-btn-cancel-settings">Cancel</button>
+                <button class="btn-primary" id="drive-btn-save-creds">Save</button>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- ── File changed on disk (buttons are built by js/conflict-dialog.js) ── -->
+<div aria-describedby="conflict-modal-message" aria-labelledby="conflict-modal-title" aria-modal="true"
+     class="app-modal" hidden id="conflict-modal" role="alertdialog">
+    <div class="app-modal-backdrop" data-role="backdrop"></div>
+    <div class="app-modal-panel">
+        <h2 id="conflict-modal-title">File changed on disk</h2>
+        <p class="drive-help" data-role="message" id="conflict-modal-message"></p>
+        <div class="drive-actions" data-role="actions"></div>
+    </div>
+</div>
+
+<!-- ── PDF preflight warnings (buttons are built by js/preflight-dialog.js) ── -->
+<div aria-describedby="preflight-modal-message" aria-labelledby="preflight-modal-title" aria-modal="true"
+     class="app-modal" hidden id="preflight-modal" role="alertdialog">
+    <div class="app-modal-backdrop" data-role="backdrop"></div>
+    <div class="app-modal-panel">
+        <h2 id="preflight-modal-title">Check before exporting</h2>
+        <p class="drive-help" data-role="message" id="preflight-modal-message"></p>
+        <ul class="drive-help app-modal-list" data-role="list" id="preflight-modal-list"></ul>
+        <div class="drive-actions" data-role="actions"></div>
+    </div>
+</div>
+
+<!-- ── PDF password prompt (js/password-dialog.js) ── -->
+<div aria-describedby="password-modal-message" aria-labelledby="password-modal-title" aria-modal="true"
+     class="app-modal" hidden id="password-modal" role="dialog">
+    <div class="app-modal-backdrop" data-role="backdrop"></div>
+    <div class="app-modal-panel">
+        <h2 id="password-modal-title">Password-protected PDF</h2>
+        <p class="drive-help" data-role="message" id="password-modal-message"></p>
+        <input aria-labelledby="password-modal-title" autocomplete="off" class="app-modal-input" data-role="password"
+               id="password-modal-input" spellcheck="false" type="password">
+        <div class="drive-actions">
+            <button class="btn-secondary" data-choice="cancel" type="button">Cancel</button>
+            <button class="btn-primary" data-choice="ok" type="button">Open PDF</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Page options for the open document (js/page-options-dialog.js) ── -->
+<div aria-describedby="po-note" aria-labelledby="page-options-modal-title" aria-modal="true"
+     class="app-modal" hidden id="page-options-modal" role="dialog">
+    <div class="app-modal-backdrop" data-role="backdrop"></div>
+    <div class="app-modal-panel page-options-panel">
+        <h2 id="page-options-modal-title">Page options</h2>
+        <p class="drive-help" id="po-note"></p>
+        <fieldset class="po-group">
+            <legend>Page size</legend>
+            <label class="po-check"><input id="po-custom" type="checkbox"> Custom size (any template)</label>
+            <div class="po-row">
+                <label for="po-width">Width</label>
+                <input autocomplete="off" class="app-modal-input po-number" id="po-width" inputmode="decimal" spellcheck="false" type="text">
+                <label for="po-height">Height</label>
+                <input autocomplete="off" class="app-modal-input po-number" id="po-height" inputmode="decimal" spellcheck="false" type="text">
+                <label for="po-unit">Unit</label>
+                <select id="po-unit">
+                    <option value="mm">mm</option>
+                    <option value="cm">cm</option>
+                    <option value="in">in</option>
+                    <option value="px">px</option>
+                </select>
+            </div>
+        </fieldset>
+        <fieldset class="po-group">
+            <legend>Layout</legend>
+            <label class="po-check"><input id="po-layout-paged" name="po-layout" type="radio" value="paged"> Pages</label>
+            <label class="po-check"><input id="po-layout-continuous" name="po-layout" type="radio" value="continuous"> One continuous page</label>
+        </fieldset>
+        <div class="po-row">
+            <label for="po-fit">Fit</label>
+            <select id="po-fit">
+                <option value="off">Off</option>
+                <option value="width">Fit width</option>
+                <option value="widest">Widest block (one continuous page)</option>
+            </select>
+        </div>
+        <div class="po-row">
+            <label for="po-margin">Margin</label>
+            <input autocomplete="off" class="app-modal-input po-number" id="po-margin" inputmode="decimal" spellcheck="false" type="text">
+            <select aria-label="Margin unit" id="po-margin-unit">
+                <option value="mm">mm</option>
+                <option value="cm">cm</option>
+                <option value="in">in</option>
+                <option value="pt">pt</option>
+            </select>
+        </div>
+        <p class="po-error" id="po-error" role="alert"></p>
+        <div class="drive-actions">
+            <button class="btn-secondary" data-choice="reset" type="button">Reset</button>
+            <button class="btn-secondary" data-choice="cancel" type="button">Cancel</button>
+            <button class="btn-primary" data-choice="save" type="button">Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Import questions, e.g. a very large PDF (buttons are built by js/conflict-dialog.js) ── -->
+<div aria-describedby="import-confirm-modal-message" aria-labelledby="import-confirm-modal-title" aria-modal="true"
+     class="app-modal" hidden id="import-confirm-modal" role="alertdialog">
+    <div class="app-modal-backdrop" data-role="backdrop"></div>
+    <div class="app-modal-panel">
+        <h2 id="import-confirm-modal-title">Before importing</h2>
+        <p class="drive-help" data-role="message" id="import-confirm-modal-message"></p>
+        <div class="drive-actions" data-role="actions"></div>
+    </div>
+</div>
+
+<!-- ── Storage unavailable (shown by app.js when IndexedDB cannot be used) ── -->
+<div class="app-banner" hidden id="storage-banner" role="alert">
+    <span>Storage unavailable, changes won't be kept</span>
+    <button aria-label="Dismiss" class="app-banner-close" id="storage-banner-close" title="Dismiss">×</button>
+</div>
+
+<!-- ── Database upgrade waiting on another tab (shown by app.js; read out once through .sr-status) ── -->
+<div class="app-banner upgrade-wait" hidden>
+    <span>Waiting for another PrintMD tab to close… It runs an older version of the app. Close it to carry on.</span>
+    <span aria-hidden="true" class="upgrade-wait-count"></span>
+</div>
+
+<!-- Template info popover -->
+<div id="template-info-popover" class="popover" hidden role="dialog" aria-label="Template details">
+    <button class="popover-close" id="template-info-close" aria-label="Close">×</button>
+    <div id="template-info-body"></div>
+</div>
+
+<!-- Command palette -->
+<div id="cmdk" class="cmdk" hidden role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="cmdk-backdrop"></div>
+    <div class="cmdk-panel">
+        <input aria-autocomplete="list" aria-controls="cmdk-list" aria-expanded="false" aria-label="Command"
+               autocomplete="off" id="cmdk-input" placeholder="Type a command…  (Esc to close)" role="combobox"
+               spellcheck="false" type="text">
+        <ul aria-label="Commands" id="cmdk-list" role="listbox"></ul>
+        <div aria-atomic="true" aria-live="polite" class="visually-hidden cmdk-status" role="status"></div>
+    </div>
+</div>
+
+<!-- App entry point (ES module) -->
+<script src="js/app.js" type="module"></script>
+
+</body>
+</html>

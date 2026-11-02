@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Importer Scale Tests (HTML table)</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>Importers at scale: a 150,000-row HTML table: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    // Split from importers-scale.test.html (the CSV half) so neither page nears the
+    // runner's 30 s page limit on a slow CI CPU. Speed is compared, never budgeted.
+    import * as utils from '../js/import-utils.js';
+    import * as html from '../js/html-import.js';
+    import * as growth from './lib/growth.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTERS_SCALE_HTML');
+
+    const BIG = 150000;
+    const htmlTableOf = (rows) => '<h1>Big</h1><table><tr><th>A</th><th>B</th></tr>' +
+        Array.from({length: rows}, (_, i) => `<tr><td>r${i}</td><td><b>${i}</b></td></tr>`).join('') + '</table>';
+
+    // The row cap bounds the cost: 150,000 rows must cost at most 12x 5,000 rows
+    // (about 5x with the cap, hundreds of times without it; see importers-scale.test.html).
+    const CAP_COST_RATIO = 12;
+
+    h.test('a 150,000-row HTML table imports without a stack overflow, cut to 5,000 rows, at about the cost of 5,000', async () => {
+        const small = htmlTableOf(utils.MAX_TABLE_ROWS);
+        const tSmall = await growth.minTime(() => html.htmlToMarkdown(small), 2);   // the first run doubles as the warm-up
+        const warnings = [];
+        const t0 = performance.now();
+        const out = await html.htmlToMarkdown(htmlTableOf(BIG), null, {onWarning: (m) => warnings.push(m)});
+        const tBig = performance.now() - t0;
+        assert(tBig < tSmall * CAP_COST_RATIO, `150,000 rows took ${Math.round(tBig)} ms, ` +
+            `${(tBig / tSmall).toFixed(1)}x the ${Math.round(tSmall)} ms of 5,000 rows: the row cap is not bounding the work`);
+        const tableLines = out.split('\n').filter(l => l.startsWith('|'));
+        assert(tableLines.length === 1 + utils.MAX_TABLE_ROWS, 'table lines: ' + tableLines.length);
+        assert(tableLines[2] === '| r0 | **0** |', 'first row: ' + tableLines[2]);
+        assert(warnings.length === 1 && /150,001 rows.*first 5,000/.test(warnings[0]), 'warnings ' + JSON.stringify(warnings));
+    });
+
+    h.run();
+</script>
+</body>
+</html>

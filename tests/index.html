@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PrintMD test suite</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        h1 {
+            font-size: 1.4rem;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        li {
+            padding: 8px 12px;
+            margin: 4px 0;
+            border-radius: 4px;
+            background: #f5f5f5;
+        }
+
+        li a {
+            text-decoration: none;
+            color: #0066cc;
+            font-weight: 500;
+        }
+
+        li span {
+            color: #666;
+            font-size: 0.875rem;
+            margin-left: 8px;
+        }
+    </style>
+</head>
+<body>
+<h1>PrintMD test suite</h1>
+<p>Serve the project over http (<code>python3 -m http.server 8080</code>) and open a page, or run
+    everything headless with <code>node tests/run-all.mjs</code>.</p>
+<ul>
+    <li><a href="store.test.html">store.js</a><span>IndexedDB store: committed writes, open and retry, version 1 to 2 upgrade, paging, title search, memory store</span></li>
+    <li><a href="docmanager.test.html">docmanager.js</a><span>Open, switch, save and remove documents; crash buffer; memory-store fallback</span></li>
+    <li><a href="doc-settings.test.html">Per-document settings</a><span>export-options.js docExportOpts (garbage and oversize values), the store round trip, docmanager: each document's format, size and orientation through switches and a reopened database, new documents, saves that leave updatedAt and the disk baseline alone, failures</span></li>
+    <li><a href="ui-prefs.test.html">UI preferences</a><span>The divider (keyboard and mouse), theme, view and sidebar come back after a reload; garbage values and out-of-range divider positions fall back or are clamped; with localStorage blocked the editor boots on the defaults (tests/lib/blocked-storage-frame.html)</span></li>
+    <li><a href="doc-settings-app.test.html">Per-document settings in the app</a><span>Three documents with different templates, sizes, orientations and formats keep them through switches and a page reload (controls, Slide lock, preview page); a template's default page applies only when it is picked; the recent order does not move; missing templates and sizes fall back</span></li>
+    <li><a href="disk-sync.test.html">disk-sync.js / conflict-dialog.js</a><span>Watching, saving to disk and the conflict dialog</span></li>
+    <li><a href="text-insert.test.html">text-insert.js</a><span>Editor text insertion</span></li>
+    <li><a href="imports.test.html">imports.js</a><span>Import dispatcher: routing, a new document per import, errors, cancel, warnings</span></li>
+    <li><a href="pdf-import.test.html">pdf-import.js</a><span>PDF text helpers: language guess, clean-up, header and footer band, right-to-left order</span></li>
+    <li><a href="importers-pdf.test.html">pdf-import.js fixtures</a><span>Code listing, tagged, RTL and injection PDFs, scans, passwords, large files, pdf.js clean-up</span></li>
+    <li><a href="importers-pdf-layout.test.html">pdf-import.js on real-world layouts</a><span>Untagged article with a sidebar, running header, table, links, image; a tall page with columns</span></li>
+    <li><a href="importers-pdf-slides.test.html">pdf-import.js on slides and figures</a><span>Title slide and bullets, tagged images and a list across pages, line joins</span></li>
+    <li><a href="importers-pdf-code.test.html">pdf-import.js on code in prose</a><span>Shell and PHP blocks between serif paragraphs: split, indented, labelled; a wrapped linked sentence; a running footer</span></li>
+    <li><a href="importers-pdf-rules.test.html">pdf-import.js rules</a><span>Fixed-pitch font names, the width test, link word snapping, wrapped and ragged tables, code beside prose, list numbers, punctuation after code (tagged and untagged)</span></li>
+    <li><a href="importers-pdf-items.test.html">pdf-import.js on a huge line</a><span>200,000 text items on one line import without a stack overflow, in linear time</span></li>
+    <li><a href="importers-pdf-growth.test.html">pdf-import.js on a crowded page</a><span>Layout code on one page of thousands of words grows linearly</span></li>
+    <li><a href="importers-fuzz.test.html">pdf-import.js on hostile text</a><span>Every PDF-text function grows linearly, with the app's built-ins</span></li>
+    <li><a href="importers-fuzz-app.test.html">pdf-import.js on hostile text, part 2</a><span>Header/footer removal, a hostile PDF, the app page's built-ins</span></li>
+    <li><a href="docx-html-epub-import.test.html">html-import.js</a><span>htmlToMarkdown: HTML import conversion</span></li>
+    <li><a href="importers-docs.test.html">docx/epub/html-import.js fixtures</a><span>Word images, EPUB encoded names, ASP.NET HTML, charsets, zip limits, tables</span></li>
+    <li><a href="importers-bombs.test.html">zip bombs</a><span>Word and EPUB archives refused while inflating</span></li>
+    <li><a href="importers-scale.test.html">importers at scale</a><span>150,000-row tables at about the cost of 5,000, array helpers</span></li>
+    <li><a href="importers-scale-html.test.html">importers at scale: HTML</a><span>A 150,000-row HTML table at about the cost of 5,000 rows</span></li>
+    <li><a href="google-drive-import.test.html">google-drive-import.js</a><span>URL parsing, sign-in, Docs, Sheets and file conversion with a stubbed fetch</span></li>
+    <li><a href="import-safety.test.html">import-utils.js and importers</a><span>Escaping, code fences, safe links, script loader retry, pdf.js without eval</span></li>
+    <li><a href="sanitiser.test.html">markdown.js sanitiser</a><span>Hostile HTML, iframe allow-list, links, heading ids, preview containment</span></li>
+    <li><a href="sidebar.test.html">sidebar.js</a><span>Recent files paging (Show more from the store's cursor), title search with a pause and no stale results, focus and announcements</span></li>
+    <li><a href="copy-text.test.html">copy-text.js</a><span>Copy HTML: the Clipboard API, the textarea fallback on plain http, a clear toast when neither works</span></li>
+    <li><a href="blocked-upgrade.test.html">store.js upgrade blocked by an old tab</a><span>The new tab shows a waiting note with the seconds left and recovers when the old tab closes</span></li>
+    <li><a href="blocked-upgrade-peer.test.html">store.js open behind another tab's long upgrade</a><span>Another tab on this code is upgrading: an "updating" note, no countdown, no banner, then the documents</span></li>
+    <li><a href="blocked-upgrade-switch.test.html">waiting note switches</a><span>An old-tab wait that finds an upgrade running switches to "updating"; when the upgrading tab goes quiet, the countdown and the banner follow</span></li>
+    <li><a href="blocked-upgrade-queued.test.html">store.js open queued behind another tab's upgrade</a><span>No "blocked" event reaches it: the app's own timer shows the note, then the banner (wait cut to 300 ms here)</span></li>
+    <li><a href="blocked-upgrade-timeout.test.html">store.js upgrade blocked for good</a><span>When the wait runs out (cut to 300 ms here), the waiting note gives way to a banner that explains the memory fallback</span></li>
+    <li><a href="template-layers.test.html">template-registry.js layers</a><span>Under the app's policy: the real manifests load with no warning, a template import that never finishes is skipped with one console warning, a core manifest that never answers is fatal with the banner (the other broken layers are in tests/template-registry.test.mjs)</span></li>
+    <li><a href="template-platform.test.html">Template platform</a><span>The editor with the test-only fixture template (tests/fixtures/platform-fixture): picker group headings, the cover subject, the page colour, only the template's page sizes with Slide locked to landscape, its fonts fetched only once it is applied, the palette and the entry's description</span></li>
+    <li><a href="template-boot.test.html">template-registry.js boot</a><span>The whole editor boots with a broken layer; with a broken core manifest it shows one banner, read out once, takes no focus and switches the toolbar off</span></li>
+    <li><a href="boot-lazy.test.html">templates.js / import-utils.js loading</a><span>A template's fonts start loading when it is applied; a failed restore step around PptxGenJS is retried, so trim and parseInt end up native</span></li>
+    <li><a href="app-boot.test.html">app.js boot</a><span>index.html boots under its CSP; sidebar, command palette, keyboard shortcuts and formatting toolbar answer</span></li>
+    <li><a href="heading-ids.test.html">app.js element references</a><span>Heading ids cannot hijack the app's elements; anchor links reach their targets; editor read-only until the first doc loads</span></li>
+    <li><a href="a11y.test.html">Accessibility</a><span>ARIA roles and names, contrast, live regions, focus rings, js/dialog-a11y.js (the keyboard walkthrough is tests/a11y-keys.mjs)</span></li>
+    <li><a href="export-options.test.html">export-options.js</a><span>Page size, orientation and margin allow-lists</span></li>
+    <li><a href="page-options-app.test.html">Page options in the app</a><span>The Page options dialog (labelled, focus inside, Escape and Cancel change nothing, Reset), Custom size from the Size select, values outside the limits refused, a custom size, one continuous page, widest and a margin of 0 stored with the document and followed by the controls and the preview, kept per document through a reload, front matter shown, a margin under the running head named in the preflight list</span></li>
+    <li><a href="page-layout.test.html">page-layout.js</a><span>The page options that need the laid-out document: the continuous page as tall as its content, the cover as tall as its own, a split into the fewest tall pages past the page limit (and too long past the total), fit width scaling a wide table and its 40% lower bound, widest widening the page up to the limit, the print rules switched on and back</span></li>
+    <li><a href="export-pipeline.test.html">export-pipeline.js / print-document.js</a><span>Prepared export, vendored fonts, print document snapshot</span></li>
+    <li><a href="pdf-export.test.html">pdf-export.js</a><span>Print window: no inline script, print after images load, image timeout, close on failure, preflight dialog</span></li>
+    <li><a href="pdf-export-app.test.html">pdf-export.js in the app</a><span>Preflight dialog before the pop-up, one window per export</span></li>
+    <li><a href="office-export.test.html">docx-export.js / pptx-export.js</a><span>Word and PowerPoint file generation</span></li>
+    <li><a href="docx-export.test.html">docx-export.js</a><span>Word structure: lists, links, tables, property order, front matter</span></li>
+    <li><a href="pptx-export.test.html">pptx-export.js / slides.js</a><span>PowerPoint slides: paragraphs, code, tables, images, continuation slides</span></li>
+    <li><a href="office-scale.test.html">docx-export.js / pptx-export.js at scale</a><span>150,000 blocks without a stack overflow, the 500-slide cap; ?scale=full runs 200,000 paragraphs and a 20,000-row table</span></li>
+    <li><a href="office-growth.test.html">office export growth</a><span>trim and Word export grow linearly, the 500-slide cap</span></li>
+    <li><a href="download.test.html">download.js</a><span>File downloads: link click, delayed URL revoke</span></li>
+</ul>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# The CI image (deploy/ci/Dockerfile) is built with server/ as its context and
+# needs only the dependency manifests.
+*
+!package.json
+!package-lock.json

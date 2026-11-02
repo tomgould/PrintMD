@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Word / EPUB / HTML Importer Fixture Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>Word, EPUB and HTML importer fixtures: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script src="../vendor/jszip/jszip.min.js"></script>
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<div id="preview-sandbox"></div>
+<script type="module">
+    // Namespace imports: a missing export fails one test, not the whole page.
+    import * as utils from '../js/import-utils.js';
+    import * as docx from '../js/docx-import.js';
+    import * as epub from '../js/epub-import.js';
+    import * as html from '../js/html-import.js';
+    import * as drive from '../js/google-drive-import.js';
+    import * as md from '../js/markdown.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTERS_DOCS');
+    md.configureMarked();
+
+    // Hostile metadata: an image and a link written as HTML, and as Markdown.
+    const CANARY = '&lt;img src="https://canary.example/meta.png"&gt;&lt;a href="https://evil.example/phish"&gt;Click&lt;/a&gt; ' +
+        '![m](https://canary.example/meta-md.png) [x](https://evil.example/hidden)';
+
+    /**
+     * Render imported Markdown the way the preview does (sanitised, in a live
+     * container) and check it holds no image, no link whose text hides its
+     * destination, and caused no request to the canary hosts.
+     */
+    async function assertInert(markdown, label) {
+        const box = document.getElementById('preview-sandbox');
+        box.innerHTML = md.renderMarkdown(markdown);
+        try {
+            const imgs = [...box.querySelectorAll('img')].map(i => i.getAttribute('src'));
+            assert(imgs.length === 0, `${label}: live image(s) ${imgs.join(', ')} from ${JSON.stringify(markdown.slice(0, 200))}`);
+            for (const a of box.querySelectorAll('a')) {
+                assert(a.textContent === a.getAttribute('href'), `${label}: hidden link ${a.outerHTML}`);
+            }
+            await new Promise(r => setTimeout(r, 200));
+            const hits = performance.getEntriesByType('resource').map(e => e.name).filter(n => /canary\.example|evil\.example/.test(n));
+            assert(hits.length === 0, `${label}: requested ${hits.join(', ')}`);
+        } finally {
+            box.textContent = '';
+        }
+    }
+
+    async function hostileEpub({title = 'Book', author = '', chapter = '<p>Body.</p>'} = {}) {
+        const zip = new JSZip();
+        zip.file('mimetype', 'application/epub+zip');
+        zip.file('META-INF/container.xml', '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="c.opf" media-type="application/oebps-package+xml"/></rootfiles></container>');
+        zip.file('c.opf', '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">' +
+            `<dc:title>${title}</dc:title><dc:creator>${author}</dc:creator></metadata>` +
+            '<manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>');
+        zip.file('c1.xhtml', `<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body>${chapter}</body></html>`);
+        return new File([await zip.generateAsync({type: 'blob'})], 'hostile.epub');
+    }
+
+    // ── Metadata cannot become live Markdown ─────────────────────────────────
+    h.test('HTML: a hostile <title> becomes a heading of plain text', async () => {
+        const out = await html.htmlToMarkdown(`<html><head><title>${CANARY}</title></head><body><p>Body text.</p></body></html>`);
+        assert(out.startsWith('# '), 'title heading: ' + out);
+        await assertInert(out, 'HTML title');
+    });
+
+    h.test('HTML: an ordinary title with punctuation renders exactly as written', async () => {
+        const title = 'Q3 Report: Sales & Marketing - 2026 | Example_Co *draft* #1 (see www.example.com) a < b, AT&T, &amp; literal';
+        const out = await html.htmlToMarkdown(`<title>${title.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</title><p>Body.</p>`);
+        const box = document.getElementById('preview-sandbox');
+        box.innerHTML = md.renderMarkdown(out);
+        const h1 = box.querySelector('h1');
+        const text = h1 && h1.textContent;
+        const links = box.querySelectorAll('a, em, strong').length;
+        box.textContent = '';
+        assert(text === title, `heading text ${JSON.stringify(text)} from ${JSON.stringify(out.split('\n')[0])}`);
+        assert(links === 0, 'title became a link or emphasis');
+    });
+
+    h.test('HTML: a hostile <h1> outside the main content, used as the title, stays text', async () => {
+        const out = await html.htmlToMarkdown(`<body><header><h1>${CANARY}</h1></header><main><p>Body.</p></main></body>`);
+        await assertInert(out, 'HTML h1 title');
+    });
+
+    h.test('EPUB: a hostile title and author stay text', async () => {
+        const out = await epub.epubToMarkdown(await hostileEpub({title: CANARY, author: CANARY + ' $&amp; $1'}));
+        assert(out.includes('$& $1'), 'author kept as written: ' + out);
+        await assertInert(out, 'EPUB title/author');
+    });
+
+    h.test('Drive: a Google Doc named with hostile text stays text', async () => {
+        const realFetch = window.fetch;
+        window.fetch = async () => new Response(`<html><head><title>${CANARY}</title></head><body><p>Doc body.</p></body></html>`);
+        try {
+            const out = await drive.importFromUrl('https://docs.google.com/document/d/1AbCdEfGhIjKlMnOp_-q/edit');
+            assert(out.startsWith('# '), 'title heading: ' + out);
+            await assertInert(out, 'Drive Doc title');
+        } finally {
+            window.fetch = realFetch;
+        }
+    });
+
+    const fixture = async (name) => new File([await (await fetch('fixtures/' + name)).blob()], name);
+    const expected = async (name) => (await (await fetch('fixtures/expected/' + name)).text()).replace(/\r\n?/g, '\n').replace(/\n$/, '');
+    const normalise = (s) => String(s).replace(/\r\n?/g, '\n');
+    const collector = () => {
+        const warnings = [];
+        return {warnings, onWarning: (m) => warnings.push(m)};
+    };
+
+    function firstDiff(got, want) {
+        const a = got.split('\n');
+        const b = want.split('\n');
+        for (let i = 0; i < Math.max(a.length, b.length); i++) {
+            if (a[i] !== b[i]) return `line ${i + 1}: got ${JSON.stringify(a[i])}, want ${JSON.stringify(b[i])}`;
+        }
+        return 'identical';
+    }
+
+    function assertSame(got, want, label) {
+        assert(normalise(got) === want, `${label}: ${firstDiff(normalise(got), want)}`);
+    }
+
+    /** A rendered Markdown table as rows of cell strings, via the shared Turndown. */
+    async function turndownHtml(markup) {
+        await utils.loadTurndown();
+        const div = document.createElement('div');
+        div.innerHTML = markup;
+        return utils.buildTurndown().turndown(div);
+    }
+
+    // ── Word ─────────────────────────────────────────────────────────────────
+    h.test('word-image.docx: headings, bold, lists, table, image inline, large image as a placeholder', async () => {
+        const opts = {...collector(), maxImageBytes: 1000};
+        const md = await docx.docxToMarkdown(await fixture('word-image.docx'), null, opts);
+        assertSame(md, await expected('word-image.md'), 'word-image.docx');
+        assert(opts.warnings.length === 2, 'warnings: ' + JSON.stringify(opts.warnings));
+        assert(/^1 image was replaced with a placeholder \(an image of \d+ KB\)/.test(opts.warnings[0]), 'image warning: ' + opts.warnings[0]);
+        assert(opts.warnings[1] === "Word conversion notes: Unrecognised paragraph style: 'Fancy Quote' (Style ID: FancyQuote)",
+            'mammoth message: ' + opts.warnings[1]);
+    });
+
+    h.test('word-image.docx: by default both images stay, byte for byte, as data URIs', async () => {
+        const file = await fixture('word-image.docx');
+        const md = await docx.docxToMarkdown(file, null, collector());
+        const zip = await JSZip.loadAsync(await file.arrayBuffer());
+        const chart = await zip.file('word/media/chart.png').async('base64');
+        assert(md.includes(`![Sales chart](data:image/png;base64,${chart})`), 'chart data URI missing or altered');
+        assert(!md.includes('Image not imported'), 'placeholder used under the default cap');
+    });
+
+    h.test('Word: the zip size is checked before mammoth inflates anything', async () => {
+        await utils.loadMammoth();
+        const real = window.mammoth.convertToHtml;
+        let calls = 0;
+        window.mammoth.convertToHtml = (...args) => { calls++; return real.apply(window.mammoth, args); };
+        try {
+            const err = await docx.docxToMarkdown(await fixture('word-image.docx'), null, {maxUncompressedBytes: 1000}).then(() => null, e => e);
+            assert(err && /This Word file would expand to .* over the .* import limit/.test(err.message), 'got ' + (err && err.message));
+            assert(calls === 0, 'mammoth ran ' + calls + ' times');
+        } finally {
+            window.mammoth.convertToHtml = real;
+        }
+    });
+
+    h.test('Word: a legacy .doc (not a zip) gets a clear message', async () => {
+        const err = await docx.docxToMarkdown(new File([new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 1, 2, 3, 4])], 'old.doc')).then(() => null, e => e);
+        assert(err && /Old \.doc files cannot be imported/.test(err.message), 'got ' + (err && err.message));
+        const err2 = await docx.docxToMarkdown(new File(['not a zip'], 'x.docx')).then(() => null, e => e);
+        assert(err2 && /not a valid Word file/.test(err2.message), 'got ' + (err2 && err2.message));
+    });
+
+    // ── EPUB ─────────────────────────────────────────────────────────────────
+    h.test('encoded-names.epub: %20 / non-ASCII hrefs, "$&" author, table; broken chapter skipped with a warning', async () => {
+        const opts = collector();
+        const md = await epub.epubToMarkdown(await fixture('encoded-names.epub'), null, opts);
+        assertSame(md, await expected('encoded-names.md'), 'encoded-names.epub');
+        assert(opts.warnings.length === 1 && /Skipped 1 chapter that is not well-formed XHTML: OEBPS\/Text\/broken\.xhtml/.test(opts.warnings[0]),
+            'warnings: ' + JSON.stringify(opts.warnings));
+    });
+
+    h.test('EPUB: hrefs resolve against the OPF folder and are percent-decoded', () => {
+        const cases = [
+            ['OEBPS', 'Text/Chapter%20One.xhtml#part', 'OEBPS/Text/Chapter One.xhtml'],
+            ['OEBPS', 'Text/Kapitel%20Zwei%20%C3%BC.xhtml', 'OEBPS/Text/Kapitel Zwei \u00FC.xhtml'],
+            ['', 'c1.xhtml', 'c1.xhtml'],
+            ['OEBPS/sub', '../Images/a.png?x=1', 'OEBPS/Images/a.png'],
+            ['OEBPS', '/root.xhtml', 'root.xhtml'],
+            ['OEBPS', 'bad%E0%A4%A.xhtml', 'OEBPS/bad%E0%A4%A.xhtml'],
+            ['OEBPS', 'https://evil.example/x.xhtml', null],
+        ];
+        for (const [dir, href, want] of cases) {
+            const got = epub.resolveHref(dir, href);
+            assert(got === want, `${dir} + ${href} -> ${JSON.stringify(got)} (want ${JSON.stringify(want)})`);
+        }
+    });
+
+    h.test('EPUB: an OPF at the zip root finds its chapters', async () => {
+        const zip = new JSZip();
+        zip.file('mimetype', 'application/epub+zip');
+        zip.file('META-INF/container.xml', '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>');
+        zip.file('content.opf', '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Root</dc:title></metadata><manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>');
+        zip.file('c1.xhtml', '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><p>Root chapter text.</p></body></html>');
+        const md = await epub.epubToMarkdown(new File([await zip.generateAsync({type: 'blob'})], 'root.epub'));
+        assert(md === '# Root\n\nRoot chapter text.', 'got ' + JSON.stringify(md));
+    });
+
+    h.test('EPUB: the zip size is checked before inflating', async () => {
+        const err = await epub.epubToMarkdown(await fixture('encoded-names.epub'), null, {maxUncompressedBytes: 100}).then(() => null, e => e);
+        assert(err && /This EPUB file would expand to/.test(err.message), 'got ' + (err && err.message));
+    });
+
+    // ── HTML ─────────────────────────────────────────────────────────────────
+    h.test('aspnet.html: form unwrapped, chrome outside <main> dropped, article header kept, windows-1252 decoded', async () => {
+        const md = await html.htmlToMarkdown(await fixture('aspnet.html'));
+        assertSame(md, await expected('aspnet.md'), 'aspnet.html');
+    });
+
+    h.test('HTML: several top-level <article>s are all kept, in order', async () => {
+        const md = await html.htmlToMarkdown('<body><header>Site</header><article><h1>One</h1><p>First.</p>' +
+            '<article><p>Nested comment.</p></article></article><aside>Ads</aside><article><h2>Two</h2><p>Second.</p></article></body>');
+        assert(md === '# One\n\nFirst.\n\nNested comment.\n\n## Two\n\nSecond.', 'got ' + JSON.stringify(md));
+    });
+
+    h.test('HTML: without a main element, page header and sidebar still go', async () => {
+        const md = await html.htmlToMarkdown('<body><header><p>Logo</p></header><h1>Title</h1><p>Body.</p><aside>Side</aside></body>');
+        assert(md === '# Title\n\nBody.', 'got ' + JSON.stringify(md));
+    });
+
+    h.test('HTML: charset from BOM, <meta charset>, http-equiv; unknown labels fall back to UTF-8', () => {
+        const ascii = (s) => Array.from(s, c => c.charCodeAt(0));
+        const meta1252 = new Uint8Array([...ascii('<meta charset="windows-1252"><p>caf'), 0xe9, ...ascii(' '), 0x80, ...ascii('</p>')]);
+        assert(html.decodeHtmlBytes(meta1252).endsWith('<p>caf\u00E9 \u20AC</p>'), 'meta charset: ' + html.decodeHtmlBytes(meta1252));
+        const equiv = new Uint8Array([...ascii('<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1"><p>'), 0x93, ...ascii('q'), 0x94]);
+        assert(html.decodeHtmlBytes(equiv).endsWith('<p>\u201Cq\u201D'), 'http-equiv: ' + html.decodeHtmlBytes(equiv));
+        const utf16 = new Uint8Array([0xff, 0xfe, ...Array.from('<p>\u00FC</p>', c => [c.charCodeAt(0) & 255, c.charCodeAt(0) >> 8]).flat()]);
+        assert(html.decodeHtmlBytes(utf16) === '<p>\u00FC</p>', 'UTF-16LE BOM: ' + html.decodeHtmlBytes(utf16));
+        const bomUtf8 = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('<meta charset="windows-1252">\u00FC')]);
+        assert(html.decodeHtmlBytes(bomUtf8) === '<meta charset="windows-1252">\u00FC', 'a UTF-8 BOM beats the meta');
+        const bogus = new Uint8Array([...ascii('<meta charset="no-such-charset">'), ...new TextEncoder().encode('\u00FC')]);
+        assert(html.decodeHtmlBytes(bogus).endsWith('\u00FC'), 'unknown label: ' + html.decodeHtmlBytes(bogus));
+    });
+
+    h.test('HTML: a meta-declared UTF-16 label without a BOM is read as UTF-8 (HTML spec)', () => {
+        const enc = (s) => new TextEncoder().encode(s);
+        for (const label of ['utf-16', 'utf-16le', 'utf-16be', 'unicode', 'ucs-2', 'csunicode', 'unicodefffe', 'UTF-16BE', 'iso-10646-ucs-2']) {
+            const out = html.decodeHtmlBytes(enc(`<meta charset="${label}"><p>Hello wörld</p>`));
+            assert(out.endsWith('<p>Hello wörld</p>'), `${label}: ${JSON.stringify(out.slice(0, 60))}`);
+        }
+        const be = [0xfe, 0xff, ...Array.from('<p>ü</p>', c => [c.charCodeAt(0) >> 8, c.charCodeAt(0) & 255]).flat()];
+        assert(html.decodeHtmlBytes(new Uint8Array(be)) === '<p>ü</p>', 'UTF-16BE BOM honoured');
+        const xud = new Uint8Array([...Array.from('<meta charset="x-user-defined"><p>caf', c => c.charCodeAt(0)), 0xe9, 0x80]);
+        assert(html.decodeHtmlBytes(xud).endsWith('café€'), 'x-user-defined as windows-1252: ' + html.decodeHtmlBytes(xud).slice(-6));
+    });
+
+    // ── Shared Turndown rules ────────────────────────────────────────────────
+    h.test('table rule: inline formatting kept, whitespace collapsed, pipes escaped, short rows padded', async () => {
+        const md = await turndownHtml('<table><thead><tr><th>Name</th><th>Notes</th><th>Link</th></tr></thead><tbody>' +
+            '<tr><td><strong>Bold</strong> and <em>it</em></td><td>line one<br>line\n   two</td><td><a href="https://example.com/x">site</a></td></tr>' +
+            '<tr><td><code>a|b</code></td><td><p>para</p><p>two</p></td></tr></tbody></table>');
+        const want = '| Name | Notes | Link |\n| --- | --- | --- |\n| **Bold** and *it* | line one line two | [site](https://example.com/x) |\n| `a\\|b` | para two |  |';
+        assert(md === want, 'got ' + JSON.stringify(md));
+    });
+
+    h.test('table rule: cell text that looks like Markdown or HTML stays text', async () => {
+        const md = await turndownHtml('<table><tr><th>h</th></tr><tr><td>*not em* &lt;img src=x&gt; [x](y)</td></tr></table>');
+        assert(md === '| h |\n| --- |\n| \\*not em\\* &lt;img src=x> \\[x\\](y) |', 'got ' + JSON.stringify(md));
+    });
+
+    h.test('image rule: only browser image data URIs, http(s) and relative sources; alt cannot break out', async () => {
+        const md = await turndownHtml('<p><img alt="ok" src="data:image/png;base64,iVBORw0KGgo="> ' +
+            '<img alt="js" src="javascript:alert(1)"> <img alt="html" src="data:text/html;base64,PHA+"> ' +
+            '<img alt="a](javascript:x) [b" src="https://example.com/a b.png"> <img src="rel/pic.png"></p>');
+        const want = '![ok](data:image/png;base64,iVBORw0KGgo=) js html ![a\\](javascript:x) \\[b](https://example.com/a%20b.png) ![](rel/pic.png)';
+        assert(md === want, 'got ' + JSON.stringify(md));
+    });
+
+    // Zip bombs, huge tables and the array helpers are in importers-scale.test.html.
+
+    // ── Zip size guard ───────────────────────────────────────────────────────
+    h.test('zipDeclaredSize reads the central directory of the fixtures', async () => {
+        const info = utils.zipDeclaredSize(await (await fixture('encoded-names.epub')).arrayBuffer());
+        assert(info.entries === 7, 'entries ' + info.entries);
+        assert(info.total > 1500 && info.total < 10000, 'total ' + info.total);
+    });
+
+    h.test('zipDeclaredSize: ZIP64 sizes count, and a non-zip is refused', () => {
+        // One central directory entry whose 32-bit size is 0xFFFFFFFF; its ZIP64 extra field says 5 GB.
+        const name = new TextEncoder().encode('big.bin');
+        const extra = new Uint8Array(4 + 8);
+        const ev = new DataView(extra.buffer);
+        ev.setUint16(0, 1, true);
+        ev.setUint16(2, 8, true);
+        ev.setBigUint64(4, 5000000000n, true);
+        const cd = new Uint8Array(46 + name.length + extra.length);
+        const cv = new DataView(cd.buffer);
+        cv.setUint32(0, 0x02014b50, true);
+        cv.setUint32(20, 1000, true);          // compressed size
+        cv.setUint32(24, 0xffffffff, true);    // uncompressed size: see ZIP64 extra
+        cv.setUint16(28, name.length, true);
+        cv.setUint16(30, extra.length, true);
+        cd.set(name, 46);
+        cd.set(extra, 46 + name.length);
+        const eocd = new Uint8Array(22);
+        const dv = new DataView(eocd.buffer);
+        dv.setUint32(0, 0x06054b50, true);
+        dv.setUint16(8, 1, true);
+        dv.setUint16(10, 1, true);
+        dv.setUint32(12, cd.length, true);
+        dv.setUint32(16, 0, true);             // central directory at offset 0
+        const bytes = new Uint8Array([...cd, ...eocd]);
+        const info = utils.zipDeclaredSize(bytes);
+        assert(info.entries === 1 && info.total === 5000000000, JSON.stringify(info));
+        let err = null;
+        try { utils.assertZipWithinLimit(bytes, {kind: 'EPUB'}); } catch (e) { err = e; }
+        assert(err && /would expand to 4768 MB, over the 200 MB import limit/.test(err.message), 'got ' + (err && err.message));
+        err = null;
+        try { utils.assertZipWithinLimit(new Uint8Array(100), {kind: 'Word'}); } catch (e) { err = e; }
+        assert(err && /not a valid Word file: it is not a zip archive/.test(err.message), 'got ' + (err && err.message));
+    });
+
+    h.run();
+</script>
+</body>
+</html>

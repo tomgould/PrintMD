@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DocManager Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>docmanager.js tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as dm from '../js/docmanager.js';
+    import * as store from '../js/store.js';
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+
+    const h = createHarness('DOCMGR');
+    const CRASH_KEY = 'printmd-crash';
+
+    function makeIO(initial = '', template = 'example-co') {
+        const io = {
+            val: initial, tid: template, saved: 0, errors: [], cancelled: 0,
+            getValue: () => io.val,
+            setValue: (t) => { io.val = t; },
+            getTemplateId: () => io.tid,
+            setTemplateId: (id) => { io.tid = id; },
+            onSaved: () => { io.saved++; },
+            onSaveError: (e) => { io.errors.push(e); },
+            cancelPendingSave: () => { io.cancelled++; },
+        };
+        return io;
+    }
+
+    async function fresh(initial = '# Start') {
+        await resetStorage(store);
+        const io = makeIO();
+        const mgr = dm.createDocManager(io);
+        await mgr.init(initial);
+        return {io, mgr};
+    }
+
+    // ── Original smoke sequence (behaviour that must not regress) ────────────
+    h.test('smoke: init, save, newDoc, switchTo, removeDoc, disk handle round-trip', async () => {
+        await resetStorage(store);
+        const io = makeIO();
+        const mgr = dm.createDocManager(io);
+        assert(dm.deriveTitle('# Hello\n\nx') === 'Hello', 'deriveTitle extracts H1');
+        assert(dm.deriveTitle('no heading') === 'Untitled', 'deriveTitle returns Untitled');
+
+        await mgr.init('# Start');
+        assert(mgr.currentId !== null, 'currentId is non-null after init');
+        assert((await store.listRecent()).length === 1, 'one doc after init');
+        assert(io.val === '# Start', 'editor shows the start text');
+
+        io.val = '# Edited Title\n\nbody';
+        await mgr.saveCurrent();
+        assert((await store.getDoc(mgr.currentId)).title === 'Edited Title', 'saved title');
+
+        const first = mgr.currentId;
+        await mgr.newDoc('# Second');
+        assert(mgr.currentId !== first, 'currentId changed after newDoc');
+        assert((await store.listRecent()).length === 2, 'two docs after newDoc');
+        assert(io.val === '# Second', 'editor shows the new doc');
+
+        await mgr.switchTo(first);
+        assert(io.val === '# Edited Title\n\nbody', 'snapshot restored after switchTo');
+
+        await mgr.removeDoc(mgr.currentId);
+        assert((await store.listRecent()).length === 1, 'one doc after removeDoc');
+
+        const handle = {name: 'x.md', __mock: true};
+        await mgr.openDiskDoc(handle, '# Disk Doc', 4242);
+        assert(mgr.currentHandle && mgr.currentHandle.__mock === true, 'currentHandle is the mock handle');
+        assert(mgr.currentOrigin === 'disk', 'origin is disk');
+        io.val = '# Disk Doc edited';
+        await mgr.saveCurrent();
+        const d = await store.getDoc(mgr.currentId);
+        assert(d.handleRef && d.handleRef.__mock === true, 'handleRef preserved in stored doc');
+        assert(d.lastModified === 4242, 'lastModified preserved in stored doc');
+        assert(d.origin === 'disk', 'origin preserved as disk');
+    });
+
+    // ── Scenario: deleting the last doc ──────────────────────────────────────
+    h.test('deleting the last doc leaves one blank doc and does not resurrect the deleted one', async () => {
+        const {io, mgr} = await fresh('# Only');
+        const id = mgr.currentId;
+        await mgr.removeDoc(id);
+        const list = await store.listRecent();
+        assert(list.length === 1, `expected 1 doc after deleting the last one, got ${list.length}`);
+        assert(list[0].id !== id, 'the deleted doc came back');
+        assert((await store.getDoc(id)) === undefined, 'deleted doc is still in the store');
+        assert(mgr.currentId === list[0].id, 'currentId should be the new blank doc');
+        assert(io.val === '', `editor should be blank, shows ${JSON.stringify(io.val)}`);
+    });
+
+    h.test('a document whose delete failed is never opened again in this session', async () => {
+        const mem = store.createMemoryStore();
+        let failDelete = true;
+        const flaky = {...mem, deleteDoc: async (id) => { if (failDelete) throw new Error('disk error (test)'); return mem.deleteDoc(id); }};
+        const io = makeIO();
+        const mgr = dm.createDocManager(io, flaky);
+        await mgr.init('# Kept');
+        const kept = mgr.currentId;
+        await mgr.newDoc('# Doomed');
+        const doomed = mgr.currentId;
+        await mgr.switchTo(kept);
+        let rejected = false;
+        try { await mgr.removeDoc(doomed); } catch (_e) { rejected = true; }
+        assert(rejected, 'the failed delete is reported');
+        assert(await mem.getDoc(doomed), 'the record is still in the store (the delete failed)');
+        await mgr.switchTo(doomed);
+        assert(mgr.currentId === kept && io.val === '# Kept', 'the deleted doc was not loaded: current ' + mgr.currentId + ', editor ' + JSON.stringify(io.val));
+        failDelete = false;
+    });
+
+    h.test('deleting the open doc loads the next one into the editor, so the next autosave cannot write the deleted text into it', async () => {
+        const {io, mgr} = await fresh('# Older doc\n\nolder text');
+        const older = mgr.currentId;
+        await mgr.newDoc('# Newer doc\n\nnewer text');
+        const newer = mgr.currentId;
+        io.val = '# Newer doc\n\nnewer text, edited';   // typed, autosave still pending
+        await mgr.removeDoc(newer);
+        assert(mgr.currentId === older, 'the older doc is current');
+        assert(io.val === '# Older doc\n\nolder text', 'the editor shows the older doc: ' + JSON.stringify(io.val));
+        // What the app's autosave timer and flush-on-leave call next.
+        await mgr.saveCurrent();
+        mgr.flushOnLeave();
+        await mgr.saveCurrent();
+        const stored = await store.getDoc(older);
+        assert(stored.snapshot === '# Older doc\n\nolder text', 'the older doc keeps its own text: ' + JSON.stringify(stored.snapshot));
+        assert((await store.getDoc(newer)) === undefined, 'the deleted doc stays deleted');
+    });
+
+    h.test('the manager has one open document and no tab list', async () => {
+        const {mgr} = await fresh('# One');
+        for (const gone of ['openIds', 'openDoc', 'closeDoc', 'ensureOpen']) {
+            assert(!(gone in mgr), `${gone} is still on the manager`);
+        }
+    });
+
+    h.test('removing the current doc cancels the pending autosave', async () => {
+        const {io, mgr} = await fresh('# Only');
+        await mgr.removeDoc(mgr.currentId);
+        assert(io.cancelled >= 1, 'cancelPendingSave was never called');
+    });
+
+    h.test('a save queued before a delete cannot bring the doc back', async () => {
+        const {mgr} = await fresh('# Z');
+        const id = mgr.currentId;
+        const pending = mgr.saveCurrent();
+        await mgr.removeDoc(id);
+        await pending.catch(() => {});
+        assert((await store.getDoc(id)) === undefined, 'late save resurrected the deleted doc');
+    });
+
+    // ── Scenario: switching docs during a save ───────────────────────────────
+    h.test('a save writes the state captured when it was called, not what the UI says afterwards', async () => {
+        const {io, mgr} = await fresh('# Start');
+        const handle = {name: 'a.md', __mock: true};
+        await mgr.openDiskDoc(handle, '# A on disk', 100, 'a.md');
+        const id = mgr.currentId;
+        io.val = '# A on disk edited';
+        const pending = mgr.saveCurrent();
+        io.tid = 'unbranded';          // the UI moves on before the write happens
+        mgr.setLastModified(999);
+        await pending;
+        const d = await store.getDoc(id);
+        assert(d.snapshot === '# A on disk edited', `snapshot was ${JSON.stringify(d.snapshot)}`);
+        assert(d.templateId === 'example-co', `templateId was ${d.templateId}, expected example-co`);
+        assert(d.lastModified === 100, `lastModified was ${d.lastModified}, expected 100`);
+        assert(d.origin === 'disk' && d.handleRef && d.handleRef.__mock === true, 'disk handle/origin lost');
+    });
+
+    h.test('switching to another doc mid-save keeps both docs intact', async () => {
+        const {io, mgr} = await fresh('# One');
+        const a = mgr.currentId;
+        await mgr.newDoc('# Two');
+        const b = mgr.currentId;
+        io.val = '# Two edited';
+        const pending = mgr.saveCurrent();
+        await mgr.switchTo(a);
+        await pending;
+        assert((await store.getDoc(a)).snapshot === '# One', 'doc A was overwritten');
+        assert((await store.getDoc(b)).snapshot === '# Two edited', 'doc B lost its edit');
+        assert(io.val === '# One', 'editor should show doc A');
+    });
+
+    // ── Scenario: dirty flag across doc switches ─────────────────────────────
+    h.test('dirty flag belongs to the doc: edited disk doc stays dirty across a switch', async () => {
+        const {io, mgr} = await fresh('# Start');
+        await mgr.openDiskDoc({name: 'a.md', __mock: true}, '# A', 100, 'a.md');
+        const a = mgr.currentId;
+        assert(mgr.isDirty() === false, 'freshly opened disk doc must be clean');
+        assert(dm.diskChangeAction(100, 200, mgr.isDirty()) === 'reload', 'clean doc should reload');
+
+        io.val = '# A edited';
+        assert(mgr.isDirty() === true, 'edited disk doc must be dirty');
+
+        await mgr.newDoc('# B');
+        assert(mgr.isDirty() === false, 'a local doc has no disk baseline, so it is not dirty');
+
+        await mgr.switchTo(a);
+        assert(io.val === '# A edited', 'edit should have been kept');
+        assert(mgr.isDirty() === true, 'doc A must still be dirty after switching away and back');
+        assert(dm.diskChangeAction(100, 200, mgr.isDirty()) === 'conflict', 'dirty doc must conflict, not reload');
+    });
+
+    h.test('switching away from and back to an untouched disk doc leaves it clean', async () => {
+        const {io, mgr} = await fresh('# Start');
+        await mgr.openDiskDoc({name: 'a.md', __mock: true}, '# A', 100, 'a.md');
+        const a = mgr.currentId;
+        await mgr.newDoc('# B');
+        await mgr.switchTo(a);
+        assert(io.val === '# A', 'text restored');
+        assert(mgr.isDirty() === false, 'untouched doc must not turn dirty after a switch');
+    });
+
+    h.test('markSynced makes the current text the clean baseline', async () => {
+        const {io, mgr} = await fresh('# Start');
+        await mgr.openDiskDoc({name: 'a.md', __mock: true}, '# A', 100, 'a.md');
+        io.val = '# A saved to disk';
+        assert(mgr.isDirty() === true, 'dirty before save');
+        mgr.markSynced(io.val);
+        assert(mgr.isDirty() === false, 'clean after markSynced');
+        await mgr.saveCurrent();
+        const d = await store.getDoc(mgr.currentId);
+        assert(typeof d.diskSyncedHash === 'string' && d.diskSyncedHash.length > 0, 'diskSyncedHash not persisted');
+    });
+
+    h.test('a stored disk doc with no baseline is treated as dirty (fails safe)', async () => {
+        await resetStorage(store);
+        const stored = await store.upsertDoc({title: 'Old', snapshot: '# Old edited', origin: 'disk',
+            handleRef: {name: 'o.md', __mock: true}, lastModified: 50, templateId: 'example-co'});
+        const io = makeIO();
+        const mgr = dm.createDocManager(io);
+        await mgr.init('');
+        assert(mgr.currentId === stored.id, 'should load the stored doc');
+        assert(mgr.isDirty() === true, 'unknown baseline must count as dirty so a disk change asks instead of overwriting');
+    });
+
+    // ── Scenario: import while switching ─────────────────────────────────────
+    h.test('concurrent switch and new doc settle with editor and store in agreement', async () => {
+        const {io, mgr} = await fresh('# One');
+        const a = mgr.currentId;
+        await mgr.newDoc('# Two');
+        await Promise.all([mgr.switchTo(a), mgr.newDoc('# Imported')]);
+        const current = await store.getDoc(mgr.currentId);
+        assert(io.val === current.snapshot,
+            `editor shows ${JSON.stringify(io.val)} but the current doc holds ${JSON.stringify(current.snapshot)}`);
+        const texts = (await store.listRecent()).map((d) => d.snapshot);
+        assert(texts.includes('# Imported'), 'imported doc missing');
+        assert(texts.includes('# One') && texts.includes('# Two'), `an existing doc was overwritten: ${JSON.stringify(texts)}`);
+    });
+
+    h.test('an import opens as a new doc and never replaces the doc active when it finishes', async () => {
+        const {io, mgr} = await fresh('# One');
+        const a = mgr.currentId;
+        await mgr.newDoc('# Two');
+        const b = mgr.currentId;
+        const {importAsNewDoc} = await import('../js/imports.js');
+        let finish;
+        const slowConvert = () => new Promise((resolve) => { finish = () => resolve('# Converted'); });
+        const running = importAsNewDoc(mgr, slowConvert, 'file');
+        await mgr.switchTo(a);          // user changes doc while the conversion runs
+        finish();
+        await running;
+        assert((await store.getDoc(a)).snapshot === '# One', 'doc A was replaced by the import');
+        assert((await store.getDoc(b)).snapshot === '# Two', 'doc B was replaced by the import');
+        const texts = (await store.listRecent()).map((d) => d.snapshot);
+        assert(texts.includes('# Converted'), 'converted text was lost');
+        assert(io.val === '# Converted', 'the imported doc should be the open one');
+    });
+
+    // ── Flush on leave / crash buffer ────────────────────────────────────────
+    h.test('flushOnLeave writes a crash buffer synchronously', async () => {
+        const {io, mgr} = await fresh('# Start');
+        io.val = '# unsaved draft';
+        mgr.flushOnLeave();
+        const raw = localStorage.getItem(CRASH_KEY);
+        assert(raw, 'no crash buffer written');
+        const buf = JSON.parse(raw);
+        assert(buf.docId === mgr.currentId && buf.source === '# unsaved draft' && buf.savedAt > 0, 'crash buffer has the wrong shape');
+    });
+
+    h.test('startup restores a crash buffer that is newer than the stored doc', async () => {
+        const {mgr} = await fresh('# Start');
+        const id = mgr.currentId;
+        localStorage.setItem(CRASH_KEY, JSON.stringify({docId: id, source: '# newer than the db', savedAt: Date.now() + 5000}));
+        store.closeDB();
+        const io2 = makeIO();
+        const mgr2 = dm.createDocManager(io2);
+        await mgr2.init('');
+        assert(mgr2.currentId === id, 'should open the same doc');
+        assert(io2.val === '# newer than the db', `restored ${JSON.stringify(io2.val)}`);
+        assert((await store.getDoc(id)).snapshot === '# newer than the db', 'restored text not persisted');
+        assert(localStorage.getItem(CRASH_KEY) === null, 'crash buffer not cleared after restore');
+    });
+
+    h.test('startup ignores a crash buffer older than the stored doc', async () => {
+        const {mgr} = await fresh('# Start');
+        const id = mgr.currentId;
+        localStorage.setItem(CRASH_KEY, JSON.stringify({docId: id, source: '# stale', savedAt: 1}));
+        store.closeDB();
+        const io2 = makeIO();
+        await dm.createDocManager(io2).init('');
+        assert(io2.val === '# Start', `stale buffer overwrote the doc: ${JSON.stringify(io2.val)}`);
+    });
+
+    // ── Failure handling ─────────────────────────────────────────────────────
+    h.test('a failed write is reported and never reported as saved', async () => {
+        await resetStorage(store);
+        let failWrites = false;   // fail only after startup, like a quota error mid-session
+        const flaky = {...store, upsertDoc: (doc) => failWrites ? Promise.reject(new Error('quota exceeded')) : store.upsertDoc(doc)};
+        const io = makeIO();
+        const mgr = dm.createDocManager(io, flaky);
+        await mgr.init('# Start');
+        failWrites = true;
+        io.val = '# edit';
+        let threw = false;
+        await mgr.saveCurrent().catch(() => { threw = true; });
+        assert(threw, 'saveCurrent must reject when the store fails');
+        assert(io.errors.length >= 1, 'onSaveError was not called');
+        assert(io.saved === 0, 'onSaved was called although nothing was written');
+    });
+
+    h.test('a successful write calls onSaved', async () => {
+        const {io, mgr} = await fresh('# Start');
+        const before = io.saved;
+        io.val = '# edit';
+        await mgr.saveCurrent();
+        assert(io.saved > before, 'onSaved was not called after a successful write');
+    });
+
+    h.test('in-memory store keeps the app usable when IndexedDB is unavailable', async () => {
+        const mem = store.createMemoryStore();
+        const io = makeIO();
+        const mgr = dm.createDocManager(io, mem);
+        await mgr.init('# Memory');
+        io.val = '# Memory edited';
+        await mgr.saveCurrent();
+        await mgr.newDoc('# Other');
+        await mgr.switchTo((await mem.listRecent()).find((d) => d.snapshot === '# Memory edited').id);
+        assert(io.val === '# Memory edited', 'edit lost in memory store');
+    });
+
+    // ── Review fixes ─────────────────────────────────────────────────────────
+    h.test('memory store is flagged isMemory', () => {
+        assert(store.createMemoryStore().isMemory === true, 'createMemoryStore().isMemory should be true');
+    });
+
+    h.test('falling back to the memory store keeps the crash buffer (it may be the only copy)', async () => {
+        await resetStorage(store);
+        const buf = JSON.stringify({docId: 'abc', source: '# My unsaved work', savedAt: Date.now()});
+        localStorage.setItem(CRASH_KEY, buf);
+        const io = makeIO();
+        await dm.createDocManager(io, store.createMemoryStore()).init('SAMPLE');
+        assert(localStorage.getItem(CRASH_KEY) === buf, `crash buffer after init: ${localStorage.getItem(CRASH_KEY)}`);
+    });
+
+    h.test('in memory mode, leaving the page and saving never overwrite or remove the crash buffer', async () => {
+        // The blocked-open case: IndexedDB holds "keep", its unsaved text is in the
+        // buffer, and this tab runs on the memory store. The buffer must survive it.
+        await resetStorage(store);
+        const buf = JSON.stringify({docId: 'keep', source: '# Keep me (unsaved crash text)', savedAt: Date.now() + 1000});
+        localStorage.setItem(CRASH_KEY, buf);
+        const io = makeIO();
+        const mgr = dm.createDocManager(io, store.createMemoryStore());
+        await mgr.init('SAMPLE');
+        io.val = 'typed in memory mode';
+        mgr.flushOnLeave();
+        await mgr.saveCurrent();
+        assert(localStorage.getItem(CRASH_KEY) === buf, `crash buffer after leaving: ${localStorage.getItem(CRASH_KEY)}`);
+        // A memory save whose text equals the buffer's must not remove it either.
+        io.val = '# Keep me (unsaved crash text)';
+        await mgr.saveCurrent();
+        assert(localStorage.getItem(CRASH_KEY) === buf, 'a memory save removed the crash buffer');
+        localStorage.removeItem(CRASH_KEY);
+    });
+
+    h.test('a crash-buffer restore whose save fails does not reject init and keeps the buffer', async () => {
+        const {mgr} = await fresh('# Start');
+        const id = mgr.currentId;
+        const buf = JSON.stringify({docId: id, source: '# newer, unsaved', savedAt: Date.now() + 5000});
+        localStorage.setItem(CRASH_KEY, buf);
+        store.closeDB();
+        let failWrites = false;
+        const flaky = {...store, upsertDoc: (doc) => failWrites ? Promise.reject(new Error('quota exceeded')) : store.upsertDoc(doc)};
+        failWrites = true;
+        const io2 = makeIO();
+        const mgr2 = dm.createDocManager(io2, flaky);
+        let threw = null;
+        await mgr2.init('').catch((e) => { threw = e; });
+        assert(threw === null, `init rejected: ${threw && threw.message}`);
+        assert(io2.val === '# newer, unsaved', `editor shows ${JSON.stringify(io2.val)}`);
+        assert(localStorage.getItem(CRASH_KEY) === buf, 'crash buffer was removed although nothing was saved');
+        assert(io2.errors.length >= 1, 'onSaveError was not called for the failed restore save');
+    });
+
+    h.test('a crash buffer for an older doc is restored even when writes fail at startup', async () => {
+        const {mgr} = await fresh('# Old');
+        const oldId = mgr.currentId;
+        await mgr.newDoc('# Newer');        // the newer doc is what init loads first
+        const buf = JSON.stringify({docId: oldId, source: '# old, unsaved', savedAt: Date.now() + 5000});
+        localStorage.setItem(CRASH_KEY, buf);
+        store.closeDB();
+        const flaky = {...store, upsertDoc: () => Promise.reject(new Error('quota exceeded'))};
+        const io2 = makeIO();
+        const mgr2 = dm.createDocManager(io2, flaky);
+        let threw = null;
+        await mgr2.init('').catch((e) => { threw = e; });
+        assert(threw === null, `init rejected: ${threw && threw.message}`);
+        assert(mgr2.currentId === oldId, 'did not switch to the crashed doc');
+        assert(io2.val === '# old, unsaved', `editor shows ${JSON.stringify(io2.val)}`);
+        assert(localStorage.getItem(CRASH_KEY) === buf, 'crash buffer removed although nothing was saved');
+    });
+
+    h.test('recordDiskSync updates a non-current doc in the store', async () => {
+        const {io, mgr} = await fresh('# Start');
+        await mgr.openDiskDoc({name: 'a.md', __mock: true}, '# A', 100, 'a.md');
+        const a = mgr.currentId;
+        io.val = '# A written to disk';
+        await mgr.newDoc('# B');            // leaves A, saving the edit with the old baseline
+        await mgr.recordDiskSync(a, '# A written to disk', 555);
+        const d = await store.getDoc(a);
+        assert(d.lastModified === 555, `lastModified ${d.lastModified}`);
+        assert(d.diskSyncedHash === dm.hashText('# A written to disk'), 'diskSyncedHash not updated');
+        await mgr.switchTo(a);
+        assert(mgr.isDirty() === false, 'doc A shows as dirty after its text was written to disk');
+        assert(mgr.currentLastModified === 555, 'baseline not loaded');
+    });
+
+    h.test('recordDiskSync on the current doc marks it synced and saves', async () => {
+        const {io, mgr} = await fresh('# Start');
+        await mgr.openDiskDoc({name: 'a.md', __mock: true}, '# A', 100, 'a.md');
+        io.val = '# A v2';
+        await mgr.recordDiskSync(mgr.currentId, '# A v2', 777);
+        assert(mgr.isDirty() === false && mgr.currentLastModified === 777, 'current doc not marked synced');
+        assert((await store.getDoc(mgr.currentId)).lastModified === 777, 'not saved');
+    });
+
+    h.test('dispose cuts the manager off: queued navigation does not touch the editor', async () => {
+        const {io, mgr} = await fresh('# Start');
+        const before = (await store.listRecent()).length;
+        let sets = 0;
+        const origSet = io.setValue;
+        io.setValue = (t) => { sets++; origSet(t); };
+        const queued = mgr.newDoc('# queued before dispose');
+        mgr.dispose();
+        const r = await queued;
+        io.val = '# text that belongs to another manager';
+        assert(r == null, 'queued navigation ran after dispose');
+        assert(sets === 0, 'setValue was called after dispose');
+        assert(io.val === '# text that belongs to another manager', 'editor changed');
+        assert((await mgr.saveCurrent()) == null, 'a disposed manager still saves');
+        mgr.flushOnLeave();
+        assert(localStorage.getItem(CRASH_KEY) === null, 'a disposed manager wrote the crash buffer');
+        assert((await store.listRecent()).length === before, 'a disposed manager created or deleted docs');
+        assert(mgr.isDirty() === false, 'isDirty read the editor after dispose');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

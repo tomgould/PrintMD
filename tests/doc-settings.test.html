@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Per-document settings Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>Per-document export settings: validation, store and docmanager</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as eo from '../js/export-options.js';
+    import * as dm from '../js/docmanager.js';
+    import * as store from '../js/store.js';
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+
+    const h = createHarness('DOCSETTINGS');
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const show = (v) => JSON.stringify(v);
+
+    // An io like the app's: the choices on screen, and every setExportOpts call the manager makes.
+    function makeIO(initial = '', template = 'example-co', opts = {format: 'pdf', pageSize: 'A4', orientation: 'portrait'}) {
+        const io = {
+            val: initial, tid: template, opts: {...opts}, applied: [], saved: 0, errors: [],
+            getValue: () => io.val,
+            setValue: (t) => { io.val = t; },
+            getTemplateId: () => io.tid,
+            setTemplateId: (id) => { io.tid = id; },
+            getExportOpts: () => ({...io.opts}),
+            setExportOpts: (o) => { io.applied.push(o); if (o) io.opts = {...io.opts, ...o}; },
+            kinds: [], errorKinds: [],
+            onSaved: (_d, info) => { io.saved++; io.kinds.push(info ? info.kind : 'text'); },
+            onSaveError: (e, info) => { io.errors.push(e); io.errorKinds.push(info ? info.kind : 'text'); },
+            cancelPendingSave: () => {},
+        };
+        return io;
+    }
+
+    // ── Validation (js/export-options.js docExportOpts) ──────────────────────
+    h.test('docExportOpts keeps the stored keys when each is an allowed value', () => {
+        // The page options (tests/page-options.test.mjs) are stored too.
+        assert(same(eo.DOC_EXPORT_KEYS, ['format', 'pageSize', 'orientation', 'customSize', 'layout', 'fit', 'margin']),
+            'keys: ' + show(eo.DOC_EXPORT_KEYS));
+        for (const o of [{format: 'docx', pageSize: 'A3', orientation: 'landscape'}, {format: 'pptx', pageSize: 'Slide', orientation: 'portrait'},
+            {format: 'pdf', pageSize: 'Legal', orientation: 'portrait'}]) {
+            assert(same(eo.docExportOpts(o), o), show(o) + ' became ' + show(eo.docExportOpts(o)));
+        }
+        // The orientation is kept as chosen with Slide, so leaving Slide gives it back.
+        assert(eo.docExportOpts({pageSize: 'Slide', orientation: 'portrait'}).orientation === 'portrait', 'orientation as chosen');
+    });
+
+    h.test('docExportOpts: not an object is null; bad values and unknown keys are dropped', () => {
+        for (const v of [undefined, null, 0, 1, true, 'A4', '{"format":"docx"}', [], [{format: 'docx'}], () => {}]) {
+            assert(eo.docExportOpts(v) === null, show(String(v)) + ' gave ' + show(eo.docExportOpts(v)));
+        }
+        const out = eo.docExportOpts({format: 'exe', pageSize: 'A4; } body { display:none', orientation: 'sideways',
+            margin: '1mm; }', extra: 'x', __proto__: {format: 'docx'}});
+        assert(same(out, {}), 'all bad: ' + show(out));
+        assert(same(eo.docExportOpts({format: 'DOCX', pageSize: 'a4', orientation: ' landscape'}), {}), 'no case or space folding');
+        assert(same(eo.docExportOpts({format: ['docx'], pageSize: {toString: () => 'A4'}, orientation: 1}), {}), 'strings only');
+        assert(same(eo.docExportOpts({format: 'docx', pageSize: 'B5'}), {format: 'docx'}), 'a good key survives a bad one');
+        const prototype = Object.create({format: 'docx'});
+        assert(same(eo.docExportOpts(prototype), {}), 'inherited keys are not read');
+    });
+
+    h.test('docExportOpts: an oversize stored value comes out as at most three short strings', () => {
+        const huge = {format: 'pdf', pageSize: 'A4'.repeat(500000), orientation: 'landscape'};
+        for (let i = 0; i < 10000; i++) huge['k' + i] = 'v'.repeat(100);
+        const out = eo.docExportOpts(huge);
+        assert(same(out, {format: 'pdf', orientation: 'landscape'}), show(out));
+        assert(JSON.stringify(out).length <= eo.DOC_EXPORT_MAX_JSON, 'capped: ' + JSON.stringify(out).length);
+        const widest = {format: 'docx', pageSize: 'Letter', orientation: 'landscape'};
+        assert(JSON.stringify(eo.docExportOpts(widest)).length <= eo.DOC_EXPORT_MAX_JSON, 'the widest valid value fits the cap');
+    });
+
+    // ── Store (js/store.js) ───────────────────────────────────────────────────
+    h.test('store: exportOpts and updatedAt survive closing and reopening the database', async () => {
+        await resetStorage(store);
+        const rec = await store.upsertDoc({title: 'A', snapshot: '# A', exportOpts: {format: 'docx', pageSize: 'A3', orientation: 'landscape'}, updatedAt: 1000});
+        store.closeDB();
+        const back = await store.getDoc(rec.id);
+        assert(same(back.exportOpts, {format: 'docx', pageSize: 'A3', orientation: 'landscape'}), show(back.exportOpts));
+        assert(back.updatedAt === 1000, 'updatedAt ' + back.updatedAt);
+    });
+
+    // ── Docmanager (js/docmanager.js) ─────────────────────────────────────────
+    h.test('two documents keep their own settings through switches and a reopened database', async () => {
+        await resetStorage(store);
+        const io = makeIO();
+        const mgr = dm.createDocManager(io);
+        await mgr.init('# A');
+        const a = mgr.currentId;
+        io.opts = {format: 'docx', pageSize: 'A3', orientation: 'landscape'};
+        await mgr.saveExportOpts(io.opts);
+        await mgr.newDoc('# B');
+        const b = mgr.currentId;
+        io.opts = {format: 'pptx', pageSize: 'Letter', orientation: 'portrait'};
+        await mgr.saveExportOpts(io.opts);
+        io.applied = [];
+        await mgr.switchTo(a);
+        assert(same(io.applied, [{format: 'docx', pageSize: 'A3', orientation: 'landscape'}]), 'A applied: ' + show(io.applied));
+        await mgr.switchTo(b);
+        assert(same(io.applied[1], {format: 'pptx', pageSize: 'Letter', orientation: 'portrait'}), 'B applied: ' + show(io.applied));
+        // A new session: the database closed and opened again, a new manager. Whichever
+        // doc opens first (both may share one updatedAt), each shows its own settings.
+        const want = {[a]: {format: 'docx', pageSize: 'A3', orientation: 'landscape'}, [b]: {format: 'pptx', pageSize: 'Letter', orientation: 'portrait'}};
+        store.closeDB();
+        const io2 = makeIO();
+        const mgr2 = dm.createDocManager(io2);
+        await mgr2.init('# unused');
+        const firstOpen = mgr2.currentId;
+        assert(firstOpen === a || firstOpen === b, 'one of the two documents opens');
+        assert(same(io2.applied, [want[firstOpen]]), 'first after reopen: ' + show(io2.applied));
+        await mgr2.switchTo(firstOpen === a ? b : a);
+        assert(same(io2.applied[1], want[mgr2.currentId]), 'second after reopen: ' + show(io2.applied));
+    });
+
+    h.test('a new document (New, open file) starts from the choices on screen and stores its own copy', async () => {
+        await resetStorage(store);
+        const io = makeIO('', 'example-co', {format: 'docx', pageSize: 'A5', orientation: 'landscape'});
+        const mgr = dm.createDocManager(io);
+        await mgr.init('# First');
+        const first = await store.getDoc(mgr.currentId);
+        assert(same(first.exportOpts, {format: 'docx', pageSize: 'A5', orientation: 'landscape'}), 'startup doc: ' + show(first.exportOpts));
+        io.opts = {format: 'pptx', pageSize: 'Slide', orientation: 'portrait'};
+        await mgr.newDoc('# New');
+        assert(same((await store.getDoc(mgr.currentId)).exportOpts, io.opts), 'New: ' + show((await store.getDoc(mgr.currentId)).exportOpts));
+        io.opts = {format: 'pdf', pageSize: 'Legal', orientation: 'portrait'};
+        await mgr.openDiskDoc({name: 'x.md'}, '# Disk', 5);
+        assert(same((await store.getDoc(mgr.currentId)).exportOpts, io.opts), 'open file: ' + show((await store.getDoc(mgr.currentId)).exportOpts));
+    });
+
+    h.test('a document without settings is opened with null (the app uses the last used) and is not rewritten', async () => {
+        await resetStorage(store);
+        const old = await store.upsertDoc({title: 'Old', snapshot: '# Old', templateId: 'example-co', origin: 'local', updatedAt: 5});
+        const io = makeIO();
+        const mgr = dm.createDocManager(io);
+        await mgr.init('# unused');
+        assert(mgr.currentId === old.id, 'the old doc opened');
+        assert(same(io.applied, [null]), 'applied: ' + show(io.applied));
+        await mgr.saveCurrent();
+        const rec = await store.getDoc(old.id);
+        assert(!('exportOpts' in rec), 'a text save does not give it settings: ' + show(rec.exportOpts));
+        await mgr.saveExportOpts({format: 'docx', pageSize: 'A4', orientation: 'portrait'});
+        assert(same((await store.getDoc(old.id)).exportOpts, {format: 'docx', pageSize: 'A4', orientation: 'portrait'}), 'copy on change');
+    });
+
+    h.test('stored garbage is cleaned on the way out and on the way in', async () => {
+        await resetStorage(store);
+        const bad = await store.upsertDoc({title: 'Bad', snapshot: '# Bad', updatedAt: 9,
+            exportOpts: {format: 'docx', pageSize: 'A4; } body { display:none', orientation: 'x', margin: '0; }', big: 'y'.repeat(10000)}});
+        const io = makeIO();
+        const mgr = dm.createDocManager(io);
+        await mgr.init('# unused');
+        assert(mgr.currentId === bad.id, 'opened');
+        assert(same(io.applied, [{format: 'docx'}]), 'applied only the good key: ' + show(io.applied));
+        await store.upsertDoc({...(await store.getDoc(bad.id)), exportOpts: 'A4'});
+        await mgr.newDoc('# other');
+        await mgr.switchTo(bad.id);
+        assert(io.applied[io.applied.length - 1] === null, 'a string is no settings: ' + show(io.applied));
+        await mgr.saveExportOpts({format: 'zip', pageSize: 'Letter', orientation: 'landscape', margin: '1in }', evil: '}'});
+        assert(same((await store.getDoc(bad.id)).exportOpts, {pageSize: 'Letter', orientation: 'landscape'}), 'saved clean: '
+            + show((await store.getDoc(bad.id)).exportOpts));
+    });
+
+    h.test('saving settings leaves updatedAt, the recent order and the disk baseline alone', async () => {
+        await resetStorage(store);
+        const io = makeIO();
+        const mgr = dm.createDocManager(io);
+        await mgr.init('# Older');
+        const older = mgr.currentId;
+        await mgr.openDiskDoc({name: 'd.md'}, '# Disk', 77);
+        const disk = mgr.currentId;
+        const before = await store.getDoc(disk);
+        const order = (await store.listRecent()).map((d) => d.id);
+        io.val = '# Disk edited';   // dirty against the file
+        assert(mgr.isDirty(), 'dirty after an edit');
+        await mgr.saveExportOpts({format: 'docx', pageSize: 'A3', orientation: 'landscape'});
+        const after = await store.getDoc(disk);
+        assert(after.updatedAt === before.updatedAt, `updatedAt moved: ${before.updatedAt} -> ${after.updatedAt}`);
+        assert(after.diskSyncedHash === before.diskSyncedHash, 'diskSyncedHash changed');
+        assert(after.snapshot === '# Disk', 'the text was not saved by a settings save: ' + show(after.snapshot));
+        assert(mgr.isDirty(), 'still dirty: a settings save is not a text save');
+        io.val = '# Disk';
+        assert(!mgr.isDirty(), 'clean when the text matches the file again');
+        await mgr.switchTo(older);
+        const olderRec = await store.getDoc(older);
+        await mgr.saveExportOpts({format: 'pptx', pageSize: 'A4', orientation: 'portrait'});
+        assert((await store.getDoc(older)).updatedAt === olderRec.updatedAt, 'older doc updatedAt moved');
+        assert(same((await store.listRecent()).map((d) => d.id), order), 'recent order changed');
+    });
+
+    h.test('settings saves run in the write queue: a text save keeps them, and a deleted doc never comes back', async () => {
+        const mem = store.createMemoryStore();
+        let release;
+        const gate = new Promise((r) => { release = r; });
+        let slowNext = false;
+        const slow = {...mem, upsertDoc: async (d) => { if (slowNext) { slowNext = false; await gate; } return mem.upsertDoc(d); }};
+        const io = makeIO();
+        const mgr = dm.createDocManager(io, slow);
+        await mgr.init('# Q');
+        const id = mgr.currentId;
+        io.val = '# Q edited';
+        slowNext = true;
+        const textSave = mgr.saveCurrent();                       // held at the store
+        const optsSave = mgr.saveExportOpts({format: 'docx', pageSize: 'A5', orientation: 'portrait'});
+        release();
+        await Promise.all([textSave, optsSave]);
+        const rec = await mem.getDoc(id);
+        assert(rec.snapshot === '# Q edited' && same(rec.exportOpts, {format: 'docx', pageSize: 'A5', orientation: 'portrait'}), show(rec));
+        await mgr.saveCurrent();
+        assert(same((await mem.getDoc(id)).exportOpts, {format: 'docx', pageSize: 'A5', orientation: 'portrait'}), 'kept by a text save');
+        await mgr.newDoc('# Other');
+        const other = mgr.currentId;
+        const late = mgr.saveExportOpts({format: 'pptx', pageSize: 'A4', orientation: 'portrait'});
+        await mgr.removeDoc(other);
+        await late;
+        assert((await mem.getDoc(other)) === undefined, 'a settings save brought a deleted doc back');
+    });
+
+    h.test('a settings write queued before a delete but run after it is dropped (the deleted-doc guard)', async () => {
+        const mem = store.createMemoryStore();
+        let release;
+        const gate = new Promise((r) => { release = r; });
+        let hold = false;
+        const upserts = [];
+        const held = {...mem, upsertDoc: async (d) => {
+            if (hold) { hold = false; await gate; }
+            upserts.push(d.id);
+            return mem.upsertDoc(d);
+        }};
+        const io = makeIO();
+        const mgr = dm.createDocManager(io, held);
+        await mgr.init('# Keep');
+        const keep = mgr.currentId;
+        await mgr.newDoc('# Doomed');
+        const doomed = mgr.currentId;
+        hold = true;
+        const blocker = mgr.recordDiskSync(keep, '# Keep', 1);   // a write to the other doc holds the queue in the store
+        const late = mgr.saveExportOpts({format: 'pptx', pageSize: 'A4', orientation: 'portrait'});   // queued, id taken now
+        const removing = mgr.removeDoc(doomed);  // forgets the doc before the late write runs
+        for (let i = 0; i < 50 && mgr.currentId === doomed; i++) await new Promise((r) => setTimeout(r, 0));
+        assert(mgr.currentId !== doomed, 'the delete started while the queue was held');
+        const before = upserts.length;
+        io.kinds = [];
+        release();
+        assert((await late) === null, 'the late settings write was dropped');
+        await removing;
+        await blocker;
+        assert(hold === false, 'the queue really was held');
+        const after = upserts.slice(before).filter((u) => u === doomed);
+        assert(after.length === 0, 'nothing wrote the deleted doc after its delete started: ' + after.length);
+        assert((await mem.getDoc(doomed)) === undefined, 'the deleted doc stayed deleted');
+        assert(!io.kinds.includes('settings'), 'no "saved" for the dropped settings write');
+    });
+
+    h.test('a failed settings save is reported like a text save and leaves the document as it was', async () => {
+        const mem = store.createMemoryStore();
+        let fail = false;
+        const flaky = {...mem, upsertDoc: async (d) => { if (fail) throw new Error('quota (test)'); return mem.upsertDoc(d); }};
+        const io = makeIO();
+        const mgr = dm.createDocManager(io, flaky);
+        await mgr.init('# Keep me');
+        const id = mgr.currentId;
+        const before = await mem.getDoc(id);
+        fail = true;
+        let rejected = false;
+        try { await mgr.saveExportOpts({format: 'docx', pageSize: 'A3', orientation: 'portrait'}); } catch (_e) { rejected = true; }
+        assert(rejected, 'the failure is returned to the caller');
+        assert(io.errors.length === 1, 'onSaveError called once: ' + io.errors.length);
+        assert(same(io.errorKinds, ['settings']), 'reported as a settings write: ' + show(io.errorKinds));
+        assert(same(await mem.getDoc(id), before), 'the record is unchanged');
+        assert(io.val === '# Keep me', 'the editor text is untouched');
+        fail = false;
+        io.kinds = [];
+        const saved = await mgr.saveExportOpts({format: 'docx', pageSize: 'A3', orientation: 'portrait'});
+        assert((await mem.getDoc(id)).snapshot === '# Keep me', 'the next save works and keeps the text');
+        assert(same(io.kinds, ['settings']) && saved && saved.id === id, 'onSaved called once, as a settings write: ' + show(io.kinds));
+        // A disposed manager (the app fell back to memory) writes nothing.
+        mgr.dispose();
+        assert((await mgr.saveExportOpts({format: 'pptx'})) === null, 'disposed: no write');
+        assert((await mem.getDoc(id)).exportOpts.format === 'docx', 'disposed manager did not write');
+    });
+
+    h.test('an io without the settings hooks still works (older callers)', async () => {
+        await resetStorage(store);
+        const io = makeIO();
+        delete io.getExportOpts;
+        delete io.setExportOpts;
+        const mgr = dm.createDocManager(io);
+        await mgr.init('# Plain');
+        await mgr.newDoc('# Plain 2');
+        assert(!('exportOpts' in (await store.getDoc(mgr.currentId))), 'no settings stored without the hook');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

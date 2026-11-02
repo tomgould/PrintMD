@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Disk Sync Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>disk-sync.js + conflict-dialog.js tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+
+<!-- Same markup as index.html's #conflict-modal -->
+<button id="outside">outside</button>
+<div class="app-modal" hidden id="conflict-modal" role="alertdialog">
+    <div class="app-modal-backdrop" data-role="backdrop"></div>
+    <div class="app-modal-panel">
+        <h2>File changed on disk</h2>
+        <p data-role="message"></p>
+        <div data-role="actions"></div>
+    </div>
+</div>
+
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as ds from '../js/disk-sync.js';
+    import * as cd from '../js/conflict-dialog.js';
+    import * as dm from '../js/docmanager.js';
+    import * as store from '../js/store.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('DISKSYNC');
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    async function waitFor(cond, label) {
+        for (let i = 0; i < 200; i++) { if (cond()) return; await tick(); }
+        throw new Error('timed out waiting for ' + label);
+    }
+    function deferred() {
+        let resolve;
+        const promise = new Promise((r) => { resolve = r; });
+        return {promise, resolve};
+    }
+
+    /** A FileSystemFileHandle stand-in. Mutate .text/.lastModified to "change the file on disk". */
+    function fakeHandle(name, text, lastModified) {
+        const fh = {
+            name, text, lastModified,
+            getFileCalls: 0, writes: [], aborted: 0,
+            failGetFile: false, failWrite: false, gate: null,
+            async getFile() {
+                fh.getFileCalls++;
+                if (fh.gate) await fh.gate.promise;
+                if (fh.failGetFile) throw new DOMException('file is gone', 'NotFoundError');
+                const t = fh.text;
+                return {name, lastModified: fh.lastModified, text: async () => t};
+            },
+            async createWritable() {
+                let buf = '';
+                return {
+                    write: async (d) => { if (fh.failWrite) throw new Error('disk full'); buf += d; },
+                    close: async () => { fh.text = buf; fh.lastModified += 1000; fh.writes.push(buf); },
+                    abort: async () => { fh.aborted++; },
+                };
+            },
+        };
+        return fh;
+    }
+
+    function makeIO() {
+        const io = {
+            val: '', tid: 'example-co',
+            getValue: () => io.val,
+            setValue: (t) => { io.val = t; },
+            getTemplateId: () => io.tid,
+            setTemplateId: (id) => { io.tid = id; },
+        };
+        return io;
+    }
+
+    /** A disk doc "a.md" open in a docManager over the memory store, plus a disk sync driving it. */
+    async function setup({text = '# A', lastModified = 100, dialog = async () => 'mine', extra = {}} = {}) {
+        const io = makeIO();
+        const mem = store.createMemoryStore();
+        const mgr = dm.createDocManager(io, mem);
+        await mgr.init('# Start');
+        const handle = fakeHandle('a.md', text, lastModified);
+        await mgr.openDiskDoc(handle, text, lastModified, 'a.md');
+        const env = {io, mem, mgr, handle, dialogs: [], messages: [], downloads: [], intervals: 0, cleared: 0};
+        const timers = {
+            setInterval: () => { env.intervals++; return env.intervals; },
+            clearInterval: () => { env.cleared++; },
+        };
+        env.sync = ds.createDiskSync({
+            docManager: mgr,
+            getText: () => io.val,
+            showDialog: async (mode, fileName) => { env.dialogs.push({mode, fileName}); return dialog(mode); },
+            notify: (m, kind) => { env.messages.push({m, kind}); },
+            showOpenFilePicker: null,
+            showSaveFilePicker: null,
+            download: (t) => { env.downloads.push(t); },
+            timers,
+            ...extra,
+        });
+        return env;
+    }
+
+    // ── Watching ─────────────────────────────────────────────────────────────
+    h.test('clean doc + disk change reloads automatically, without a dialog', async () => {
+        const e = await setup();
+        e.handle.text = '# A changed on disk';
+        e.handle.lastModified = 200;
+        const r = await e.sync.checkDiskChange();
+        assert(r === 'reloaded', `result ${r}`);
+        assert(e.io.val === '# A changed on disk', `editor shows ${JSON.stringify(e.io.val)}`);
+        assert(e.dialogs.length === 0, 'a dialog was shown for a clean doc');
+        assert(e.mgr.isDirty() === false, 'reloaded doc must be clean');
+        assert(e.mgr.currentLastModified === 200, 'baseline not updated');
+        assert((await e.mem.getDoc(e.mgr.currentId)).snapshot === '# A changed on disk', 'reload not saved to the store');
+    });
+
+    h.test('no disk change: nothing happens', async () => {
+        const e = await setup();
+        const r = await e.sync.checkDiskChange();
+        assert(r === 'none', `result ${r}`);
+        assert(e.dialogs.length === 0 && e.io.val === '# A', 'something changed');
+    });
+
+    h.test('dirty doc + disk change asks; "Keep mine" keeps the edit and the doc stays dirty', async () => {
+        const e = await setup({dialog: async () => 'mine'});
+        e.io.val = '# A edited here';
+        e.handle.text = '# A edited elsewhere';
+        e.handle.lastModified = 200;
+        const r = await e.sync.checkDiskChange();
+        assert(r === 'kept', `result ${r}`);
+        assert(e.dialogs.length === 1 && e.dialogs[0].mode === 'watch', `dialogs ${JSON.stringify(e.dialogs)}`);
+        assert(e.dialogs[0].fileName === 'a.md', 'dialog not told the file name');
+        assert(e.io.val === '# A edited here', 'edit was replaced');
+        assert(e.mgr.isDirty() === true, 'doc must stay dirty after Keep mine');
+    });
+
+    h.test('"Keep mine" does not ask again for the same disk version, but does for a newer one', async () => {
+        const e = await setup({dialog: async () => 'mine'});
+        e.io.val = '# A edited here';
+        e.handle.lastModified = 200;
+        await e.sync.checkDiskChange();
+        const again = await e.sync.checkDiskChange();
+        assert(again === 'none', `second check returned ${again}`);
+        assert(e.dialogs.length === 1, `asked ${e.dialogs.length} times for the same disk version`);
+        e.handle.lastModified = 300;
+        await e.sync.checkDiskChange();
+        assert(e.dialogs.length === 2, 'a newer disk version should ask again');
+    });
+
+    h.test('"Load disk version" replaces the edit and marks the doc clean', async () => {
+        const e = await setup({dialog: async () => 'disk'});
+        e.io.val = '# A edited here';
+        e.handle.text = '# disk wins';
+        e.handle.lastModified = 200;
+        const r = await e.sync.checkDiskChange();
+        assert(r === 'loaded-disk', `result ${r}`);
+        assert(e.io.val === '# disk wins', `editor shows ${JSON.stringify(e.io.val)}`);
+        assert(e.mgr.isDirty() === false, 'doc should be clean');
+    });
+
+    h.test('in-flight guard: two overlapping checks show one dialog', async () => {
+        const gate = deferred();
+        const e = await setup({dialog: () => gate.promise});
+        e.io.val = '# A edited here';
+        e.handle.lastModified = 200;
+        const first = e.sync.checkDiskChange();
+        await waitFor(() => e.dialogs.length === 1, 'the first dialog');
+        const second = await e.sync.checkDiskChange();
+        assert(second === 'busy', `overlapping check returned ${second}`);
+        gate.resolve('mine');
+        await first;
+        assert(e.dialogs.length === 1, `${e.dialogs.length} dialogs shown`);
+    });
+
+    h.test('doc switched while reading the file: the result is dropped', async () => {
+        const e = await setup();
+        const diskId = e.mgr.currentId;
+        e.handle.text = '# changed on disk';
+        e.handle.lastModified = 200;
+        e.handle.gate = deferred();
+        const running = e.sync.checkDiskChange();
+        await waitFor(() => e.handle.getFileCalls === 1, 'getFile');
+        await e.mgr.newDoc('# B');
+        e.handle.gate.resolve();
+        const r = await running;
+        assert(r === 'stale', `result ${r}`);
+        assert(e.io.val === '# B', `the other doc was overwritten: ${JSON.stringify(e.io.val)}`);
+        assert((await e.mem.getDoc(diskId)).snapshot === '# A', 'the disk doc was changed in the store');
+    });
+
+    h.test('doc switched while the dialog is open: the choice is not applied', async () => {
+        const gate = deferred();
+        const e = await setup({dialog: () => gate.promise});
+        e.io.val = '# A edited here';
+        e.handle.text = '# changed on disk';
+        e.handle.lastModified = 200;
+        const running = e.sync.checkDiskChange();
+        await waitFor(() => e.dialogs.length === 1, 'the dialog');
+        await e.mgr.newDoc('# B');
+        gate.resolve('disk');
+        const r = await running;
+        assert(r === 'stale', `result ${r}`);
+        assert(e.io.val === '# B', `disk text was applied to the wrong doc: ${JSON.stringify(e.io.val)}`);
+    });
+
+    h.test('getFile throwing stops the watcher with a visible message', async () => {
+        const e = await setup();
+        e.sync.startWatching();
+        assert(e.sync.watching === true, 'watcher did not start');
+        e.handle.failGetFile = true;
+        const r = await e.sync.checkDiskChange();
+        assert(r === 'stopped', `result ${r}`);
+        assert(e.sync.watching === false, 'watcher still running');
+        assert(e.messages.some((x) => x.m === ds.STOPPED_MESSAGE && x.kind === 'error'), `messages ${JSON.stringify(e.messages)}`);
+        e.sync.resumeWatching();
+        assert(e.sync.watching === false, 'resuming (tab visible again) restarted a dead watcher');
+        const calls = e.handle.getFileCalls;
+        assert((await e.sync.checkDiskChange()) === 'stopped' && e.handle.getFileCalls === calls, 'kept polling a lost handle');
+        const shown = e.messages.filter((x) => x.m === ds.STOPPED_MESSAGE).length;
+        assert(shown === 1, `stopped message shown ${shown} times`);
+    });
+
+    // ── Saving ───────────────────────────────────────────────────────────────
+    h.test('save writes in place and marks the doc clean with the new disk time', async () => {
+        const e = await setup();
+        e.io.val = '# A saved';
+        const r = await e.sync.saveFile();
+        assert(r === 'saved', `result ${r}`);
+        assert(e.handle.text === '# A saved', 'file not written');
+        assert(e.mgr.isDirty() === false, 'doc still dirty after save');
+        assert(e.mgr.currentLastModified === e.handle.lastModified, 'baseline not moved to the new disk time');
+        assert((await e.sync.checkDiskChange()) === 'none', 'our own write was seen as an outside change');
+    });
+
+    h.test('save detects a disk change since load; Cancel writes nothing', async () => {
+        const e = await setup({dialog: async () => 'cancel'});
+        e.io.val = '# mine';
+        e.handle.text = '# theirs';
+        e.handle.lastModified = 200;
+        const r = await e.sync.saveFile();
+        assert(r === 'cancelled', `result ${r}`);
+        assert(e.dialogs.length === 1 && e.dialogs[0].mode === 'save', `dialogs ${JSON.stringify(e.dialogs)}`);
+        assert(e.handle.writes.length === 0 && e.handle.text === '# theirs', 'disk was overwritten');
+        assert(e.io.val === '# mine', 'editor text changed');
+    });
+
+    h.test('save conflict: Overwrite writes mine; Load disk version loads theirs', async () => {
+        const e = await setup({dialog: async () => 'overwrite'});
+        e.io.val = '# mine';
+        e.handle.text = '# theirs';
+        e.handle.lastModified = 200;
+        assert((await e.sync.saveFile()) === 'saved', 'overwrite did not save');
+        assert(e.handle.text === '# mine', 'overwrite did not write');
+
+        const f = await setup({dialog: async () => 'disk'});
+        f.io.val = '# mine';
+        f.handle.text = '# theirs';
+        f.handle.lastModified = 200;
+        assert((await f.sync.saveFile()) === 'loaded-disk', 'load disk did not load');
+        assert(f.io.val === '# theirs' && f.handle.writes.length === 0, 'load disk wrote or did not load');
+        assert(f.mgr.isDirty() === false, 'doc should be clean after loading the disk version');
+    });
+
+    h.test('save reads the editor text after the permission prompt', async () => {
+        const e = await setup();
+        e.io.val = '# before prompt';
+        e.handle.requestPermission = async () => { e.io.val = '# typed during the prompt'; return 'granted'; };
+        await e.sync.saveFile();
+        assert(e.handle.text === '# typed during the prompt', `file holds ${JSON.stringify(e.handle.text)}`);
+        assert(e.mgr.isDirty() === false, 'doc should be clean');
+    });
+
+    h.test('save does not write when the user switches docs during the permission prompt', async () => {
+        const e = await setup();
+        e.handle.requestPermission = async () => { await e.mgr.newDoc('# B'); return 'granted'; };
+        const r = await e.sync.saveFile();
+        assert(r === 'stale', `result ${r}`);
+        assert(e.handle.writes.length === 0, `wrote ${JSON.stringify(e.handle.writes)} into a.md`);
+    });
+
+    h.test('a save that completes after the user switched docs still records the disk sync for the written doc', async () => {
+        const e = await setup();
+        const a = e.mgr.currentId;
+        e.io.val = '# A saved late';
+        const realCreate = e.handle.createWritable;
+        e.handle.createWritable = async () => {
+            const w = await realCreate();
+            const close = w.close;
+            // The user switches documents while the write is still in flight.
+            w.close = async () => { await e.mgr.newDoc('# B'); await close(); };
+            return w;
+        };
+        const r = await e.sync.saveFile();
+        assert(r === 'saved', `result ${r}`);
+        assert(e.handle.text === '# A saved late', 'file not written');
+        const d = await e.mem.getDoc(a);
+        assert(d.lastModified === e.handle.lastModified, `stored lastModified ${d.lastModified}, disk ${e.handle.lastModified}`);
+        assert(d.diskSyncedHash === dm.hashText('# A saved late'), 'stored diskSyncedHash is stale');
+        await e.mgr.switchTo(a);
+        assert(e.mgr.isDirty() === false, 'written doc shows as dirty');
+        assert((await e.sync.checkDiskChange()) === 'none', 'our own write shows as an outside change (false conflict)');
+    });
+
+    h.test('a failed write aborts the stream, reports it, and does not mark the doc synced', async () => {
+        const e = await setup();
+        e.io.val = '# unsaved';
+        e.handle.failWrite = true;
+        const r = await e.sync.saveFile();
+        assert(e.handle.aborted === 1, `abort() called ${e.handle.aborted} times`);
+        assert(e.handle.text === '# A', 'file content changed');
+        assert(e.messages.some((x) => x.kind === 'error' && /disk full/.test(x.m)), `error not surfaced: ${JSON.stringify(e.messages)}`);
+        assert(r === 'downloaded' && e.downloads[0] === '# unsaved', 'no download fallback');
+        assert(e.mgr.isDirty() === true, 'doc marked clean although the file was not written');
+    });
+
+    h.test('download fallback (no writable handle) does not mark the doc synced', async () => {
+        const e = await setup();
+        delete e.handle.createWritable;
+        e.io.val = '# edited';
+        const r = await e.sync.saveFile();
+        assert(r === 'downloaded', `result ${r}`);
+        assert(e.downloads.length === 1 && e.downloads[0] === '# edited', 'download did not get the text');
+        assert(e.mgr.isDirty() === true, 'a download is not the file: doc must stay dirty');
+    });
+
+    h.test('local doc + save picker: the doc becomes a disk doc linked to the new file', async () => {
+        const picked = fakeHandle('new.md', '', 1);
+        const e = await setup({extra: {showSaveFilePicker: async () => picked}});
+        await e.mgr.newDoc('# Local');
+        assert(e.mgr.currentOrigin === 'local', 'precondition: local doc');
+        const r = await e.sync.saveFile();
+        assert(r === 'saved', `result ${r}`);
+        assert(picked.text === '# Local', 'new file not written');
+        assert(e.mgr.currentOrigin === 'disk' && e.mgr.currentHandle === picked, 'doc not attached to the file');
+        assert(e.mgr.isDirty() === false, 'doc should be clean');
+        assert(e.sync.watching === true, 'the new file is not watched');
+        assert(e.downloads.length === 0, 'downloaded as well');
+    });
+
+    h.test('local doc: cancelling the save picker neither saves nor downloads', async () => {
+        const e = await setup({extra: {showSaveFilePicker: async () => { throw new DOMException('cancelled', 'AbortError'); }}});
+        await e.mgr.newDoc('# Local');
+        const r = await e.sync.saveFile();
+        assert(r === 'cancelled', `result ${r}`);
+        assert(e.downloads.length === 0, 'downloaded after cancel');
+        assert(e.mgr.currentOrigin === 'local', 'origin changed');
+    });
+
+    h.test('local doc without a save picker downloads and stays local', async () => {
+        const e = await setup();
+        await e.mgr.newDoc('# Local');
+        const r = await e.sync.saveFile();
+        assert(r === 'downloaded' && e.downloads[0] === '# Local', `result ${r}`);
+        assert(e.mgr.currentOrigin === 'local' && !e.mgr.currentHandle, 'download attached a file');
+    });
+
+    // ── Conflict dialog (DOM) ────────────────────────────────────────────────
+    function key(el, k, extra = {}) {
+        el.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true, ...extra}));
+    }
+
+    h.test('dialog (watch): "Keep mine" has focus, Escape keeps mine, focus is restored', async () => {
+        const root = document.getElementById('conflict-modal');
+        const outside = document.getElementById('outside');
+        const show = cd.createConflictDialog(root);
+        outside.focus();
+        const p = show('watch', 'a.md');
+        assert(root.hidden === false, 'dialog not shown');
+        assert(document.activeElement && document.activeElement.textContent === 'Keep mine', `focus on ${document.activeElement && document.activeElement.textContent}`);
+        assert(/a\.md/.test(root.querySelector('[data-role="message"]').textContent), 'file name missing from the message');
+        key(document.activeElement, 'Escape');
+        assert((await p) === 'mine', 'Escape did not choose Keep mine');
+        assert(root.hidden === true, 'dialog still visible');
+        assert(document.activeElement === outside, 'focus not restored');
+    });
+
+    h.test('dialog (save): Cancel is the default, three choices, Tab stays inside', async () => {
+        const root = document.getElementById('conflict-modal');
+        const show = cd.createConflictDialog(root);
+        const p = show('save', 'a.md');
+        const labels = Array.from(root.querySelectorAll('button')).map((b) => b.textContent);
+        assert(JSON.stringify(labels) === JSON.stringify(['Cancel', 'Load disk version', 'Overwrite disk with mine']), `buttons ${JSON.stringify(labels)}`);
+        assert(document.activeElement.textContent === 'Cancel', 'Cancel does not have focus');
+        key(document.activeElement, 'Tab', {shiftKey: true});
+        assert(document.activeElement.textContent === 'Overwrite disk with mine', 'Shift+Tab did not wrap to the last button');
+        key(document.activeElement, 'Tab');
+        assert(document.activeElement.textContent === 'Cancel', 'Tab did not wrap to the first button');
+        root.querySelector('[data-choice="overwrite"]').click();
+        assert((await p) === 'overwrite', 'click did not resolve with its choice');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

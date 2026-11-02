@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Office Export Scale Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+<h1>Word and PowerPoint export of very large documents</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script src="../vendor/jszip/jszip.min.js"></script>
+<!-- As in index.html: keep the browser's own trim and parseInt around pptxgen's core-js. -->
+<script src="../js/builtins-save.js"></script>
+<script src="../vendor/pptxgenjs/pptxgen.bundle.js"></script>
+<script src="../js/builtins-restore.js"></script>
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as docx from '../js/docx-export.js';
+    import * as pptx from '../js/pptx-export.js';
+    import * as pipeline from '../js/export-pipeline.js';
+    import * as md from '../js/markdown.js';
+    import {getTemplates} from '../js/templates.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    // An argument spread such as push(...array) or Math.max(...array) throws
+    // "Maximum call stack size exceeded" from about 125,000 items in V8.
+    //
+    // Default (light) run: the exporters get HTML built directly, no Markdown
+    // rendering, with 150,000 blocks: just past the limit, so a spread where the
+    // Word exporter gathers blocks fails, and fast enough for CI (the slide
+    // model's spread sites are unit tests in tests/test.js). ?scale=full (run-all sets it
+    // when TEST_SCALE=1) renders 200,000 paragraphs, 200,000 list items and a
+    // 20,000-row table from Markdown instead.
+    //
+    // Speed is checked by growth, not by a wall-clock budget that a slower CPU
+    // (CI) would fail: see tests/lib/growth.js.
+    const FULL = new URLSearchParams(location.search).get('scale') === 'full';
+    const N = 150000;
+    const h = createHarness('SCALE', {timeoutMs: FULL ? 120000 : 30000});
+    md.configureMarked();
+    const entry = getTemplates()[0];
+    const doc = {title: 'Big', author: '', date: ''};
+
+    // One document reaches both places the Word exporter gathers blocks: the div's
+    // 150,000 paragraphs come back from blockXml into flowXml's list, and that list
+    // into the document body.
+    const LIGHT = {
+        [`${N.toLocaleString('en')} paragraphs in a div`]: {
+            html: () => '<h1>Big</h1><div>' + Array.from({length: N}, (_, i) => `<p>Para ${i}.</p>`).join('') + '</div>',
+            count: N,
+        },
+    };
+    const HEAVY = {
+        '200,000 paragraphs': {md: () => Array.from({length: 200000}, (_, i) => `Para ${i}.`).join('\n\n'), count: 200000},
+        '200,000 list items': {md: () => Array.from({length: 200000}, (_, i) => `- item ${i}`).join('\n'), count: 200000},
+        'a 20,000-row table': {md: () => '| a | b |\n|---|---|\n' + Array.from({length: 20000}, (_, i) => `| r${i} | v${i} |`).join('\n'), count: 20000, unit: 'tr'},
+    };
+    const cache = {};
+    function input(name) {
+        if (cache[name]) return cache[name];
+        if (FULL) {
+            const p = pipeline.prepareExport('# Big\n\n' + HEAVY[name].md(), entry, {orientation: 'portrait'});
+            cache[name] = {doc: p.doc, html: p.bodyHTML};
+        } else {
+            cache[name] = {doc, html: LIGHT[name].html()};
+        }
+        return cache[name];
+    }
+
+    h.test('the page loads pptxgen as the app does: trim and parseInt stay the browser\'s own', () => {
+        // pptxgen's core-js swaps them for quadratic regex versions unless builtins-save/restore wrap the bundle.
+        for (const [name, fn] of [['String.prototype.trim', String.prototype.trim], ['trimEnd', String.prototype.trimEnd],
+            ['parseInt', window.parseInt], ['Number.parseInt', Number.parseInt]]) {
+            assert(/\[native code\]/.test(Function.prototype.toString.call(fn)), name + ' is native');
+        }
+        assert(('a' + ' '.repeat(200000) + 'b').trim().length === 200002, 'trim result');
+    });
+
+    // Growth checks (trim, Word export) and the 500-slide cap: office-growth.test.html.
+
+    for (const [name, spec] of Object.entries(FULL ? HEAVY : LIGHT)) {
+        h.test(`Word: ${name} exports as valid XML`, async () => {
+            const {doc: d, html} = input(name);
+            const blob = await docx.docxBlob(d, entry, html, {onWarning: () => {}});
+            const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+            const xml = new DOMParser().parseFromString(await zip.file('word/document.xml').async('string'), 'application/xml');
+            assert(!xml.getElementsByTagName('parsererror')[0], 'document.xml parses');
+            const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+            const unit = spec.unit || 'p';
+            const n = xml.getElementsByTagNameNS(W, unit).length;
+            assert(n >= spec.count, `${n} w:${unit} for ${spec.count} source items`);
+        });
+    }
+
+    if (FULL) {
+        for (const name of Object.keys(HEAVY)) {
+            h.test(`PowerPoint: ${name} exports, capped at 500 content slides`, async () => {
+                const {doc: d, html} = input(name);
+                const warnings = [];
+                const blob = await pptx.pptxBlob(d, entry, html, {orientation: 'portrait', onWarning: (w) => warnings.push(w)});
+                const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+                const slides = Object.keys(zip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f)).length;
+                assert(slides <= 501, `${slides} slides`);
+                assert(warnings.some(w => /stops at 500 slides/.test(w)), JSON.stringify(warnings));
+            });
+        }
+    }
+
+    h.run();
+</script>
+</body>
+</html>

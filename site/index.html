@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrintMD: Markdown to print-quality PDF</title>
+<meta name="description" content="A Markdown editor that exports print-quality PDF, Word and PowerPoint, plus a PDF service that runs on your own computer.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<style>
+:root {
+  --bg: #f8fafa;
+  --surface: #ffffff;
+  --text: #0f1f1e;
+  --muted: #4b5f5d;
+  --line: #d6e2e0;
+  --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --accent-soft: #e3f5f2;
+  --code-bg: #0f1f1e;
+  --code-text: #d7ece8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c1615;
+    --surface: #132220;
+    --text: #e6f2f0;
+    --muted: #9db4b1;
+    --line: #25403c;
+    --accent: #2dd4bf;
+    --accent-ink: #062321;
+    --accent-soft: #123532;
+    --code-bg: #08100f;
+    --code-text: #d7ece8;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c1615;
+  --surface: #132220;
+  --text: #e6f2f0;
+  --muted: #9db4b1;
+  --line: #25403c;
+  --accent: #2dd4bf;
+  --accent-ink: #062321;
+  --accent-soft: #123532;
+  --code-bg: #08100f;
+  --code-text: #d7ece8;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+header.top { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; gap: 16px; }
+header.top nav { display: flex; gap: 20px; font-size: 15px; flex-wrap: wrap; }
+header.top nav a { color: var(--muted); text-decoration: none; }
+header.top nav a:hover { color: var(--text); }
+.logo { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); font-weight: 700; font-size: 22px; letter-spacing: -0.01em; }
+.logo svg { width: 30px; height: 30px; flex: none; }
+.logo b { color: var(--accent); }
+.hero { display: grid; grid-template-columns: 1.15fr 1fr; gap: 48px; align-items: center; padding: 56px 0 72px; }
+.hero h1 { font-size: clamp(34px, 5vw, 56px); line-height: 1.08; margin: 0 0 20px; letter-spacing: -0.025em; }
+.hero p.lead { font-size: 20px; color: var(--muted); margin: 0 0 28px; max-width: 34em; }
+.cta { display: flex; gap: 12px; flex-wrap: wrap; }
+.btn { display: inline-block; padding: 12px 22px; border-radius: 10px; font-weight: 600; text-decoration: none; border: 1px solid var(--accent); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); }
+.btn.ghost { color: var(--accent); background: transparent; }
+.page-mock { background: #fff; color: #1b1b1b; border-radius: 6px; padding: 34px 30px 40px; box-shadow: 0 1px 0 rgba(0,0,0,0.04), 0 18px 40px rgba(15,31,30,0.18); aspect-ratio: 1 / 1.3; font-family: Georgia, "Times New Roman", serif; overflow: hidden; position: relative; }
+.page-mock .kicker { font: 700 10px/1 system-ui, sans-serif; letter-spacing: 0.14em; text-transform: uppercase; color: #c0392b; margin-bottom: 14px; }
+.page-mock h2 { font: 800 28px/1.05 system-ui, sans-serif; letter-spacing: -0.02em; margin: 0 0 14px; }
+.page-mock .rule { height: 3px; width: 44px; background: #c0392b; margin-bottom: 16px; }
+.page-mock p { font-size: 11.5px; line-height: 1.6; margin: 0 0 10px; color: #333; }
+.page-mock .cols { column-count: 2; column-gap: 18px; }
+.page-mock .foot { position: absolute; left: 30px; right: 30px; bottom: 14px; display: flex; justify-content: space-between; font: 9px system-ui, sans-serif; color: #888; border-top: 1px solid #ddd; padding-top: 8px; }
+.callout { background: var(--accent-soft); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 10px; padding: 18px 22px; margin: 0 0 72px; }
+.callout strong { color: var(--text); }
+.callout p { margin: 0; color: var(--muted); }
+section { padding: 0 0 72px; }
+section h2 { font-size: 30px; letter-spacing: -0.02em; margin: 0 0 8px; }
+section p.sub { color: var(--muted); margin: 0 0 28px; max-width: 40em; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+.card h3 { margin: 0 0 6px; font-size: 18px; }
+.card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+pre { background: var(--code-bg); color: var(--code-text); padding: 18px 20px; border-radius: 12px; overflow-x: auto; font: 14px/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace; margin: 0 0 16px; }
+code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.tpl h3 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.tpl code { background: var(--accent-soft); color: var(--accent); padding: 2px 8px; border-radius: 6px; font-size: 13px; }
+ul.posts { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+ul.posts li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; }
+ul.posts a { font-weight: 600; text-decoration: none; }
+ul.posts span { display: block; color: var(--muted); font-size: 15px; margin-top: 2px; }
+footer { border-top: 1px solid var(--line); padding: 28px 0 48px; color: var(--muted); font-size: 14.5px; }
+.shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
+figure { margin: 0; }
+figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+figure.wide img { border-radius: 12px; box-shadow: 0 18px 40px rgba(15,31,30,0.14); }
+figcaption { color: var(--muted); font-size: 14.5px; margin-top: 8px; }
+@media (max-width: 800px) {
+  .shots { grid-template-columns: 1fr; }
+  .hero { grid-template-columns: 1fr; gap: 32px; padding: 32px 0 48px; }
+  .grid, .two { grid-template-columns: 1fr; }
+  .page-mock { max-width: 360px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="logo" href="#top" aria-label="PrintMD">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 2h11l7 7v19a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="#0f766e"/><path d="M19 2v5a2 2 0 0 0 2 2h5z" fill="#99f6e4"/><path d="M11 14h10M16 14v11" stroke="#fff" stroke-linecap="round" stroke-width="2.4" fill="none"/></svg>
+      <span>Print<b>MD</b></span>
+    </a>
+    <nav aria-label="Main">
+      <a href="#features">Features</a>
+      <a href="#templates">Templates</a>
+      <a href="#run-it">Run it</a>
+      <a href="#blog">Blog</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <div class="hero">
+      <div>
+        <h1>Markdown in. A PDF that looks designed out.</h1>
+        <p class="lead">PrintMD is a Markdown editor with a live preview that exports print-quality PDF, Word and PowerPoint. A small PDF service on your own machine turns a file into a finished PDF with one command.</p>
+        <div class="cta">
+          <a class="btn primary" href="#run-it">Run it locally</a>
+          <a class="btn ghost" href="#blog">Read the blog</a>
+        </div>
+      </div>
+      <div class="page-mock" role="img" aria-label="A page from a PDF made with the dealmobile template: a red kicker, a heavy headline, a short red rule and two columns of text">
+        <div class="kicker">Field notes</div>
+        <h2>Why a tidy PDF still matters</h2>
+        <div class="rule"></div>
+        <div class="cols">
+          <p>A document is read by someone who did not watch you write it. The type, the spacing and where the page breaks fall decide whether they keep reading.</p>
+          <p>PrintMD handles those details for you, so the Markdown stays plain and the page still looks like someone cared.</p>
+          <p>Headings never end a page. Tables repeat their header row. Fonts are embedded, so the file looks the same everywhere.</p>
+        </div>
+        <div class="foot"><span>Field notes</span><span>Page 1 of 4</span></div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p><strong>Run it on your own computer for the best results.</strong> The editor works from a web server, but the PDF service renders with your copy of Chrome and only ever listens on 127.0.0.1. It refuses to run hosted, on purpose: your documents stay on your machine.</p>
+    </div>
+
+    <section id="look">
+      <h2>What it looks like</h2>
+      <p class="sub">The editor on the left of the preview, and pages from a real export.</p>
+      <figure class="wide">
+        <img src="img/editor.png" width="1680" height="1000" alt="The PrintMD editor: Markdown on the left and the Dealmobile template's cover on the right" loading="lazy">
+        <figcaption>The editor with the Dealmobile template. The preview is the page.</figcaption>
+      </figure>
+      <div class="shots">
+        <figure><img src="img/dealmobile-cover.png" width="661" height="935" alt="The Dealmobile cover: a heavy sans headline over a red italic serif" loading="lazy"><figcaption>Dealmobile, the cover.</figcaption></figure>
+        <figure><img src="img/dealmobile-code.png" width="661" height="935" alt="A Dealmobile page with lists and a coloured JavaScript code block" loading="lazy"><figcaption>Dealmobile, lists and code.</figcaption></figure>
+        <figure><img src="img/unbranded-code.png" width="661" height="935" alt="The same page in the Unbranded template" loading="lazy"><figcaption>Unbranded, the same page.</figcaption></figure>
+      </div>
+      <figure style="margin-top:16px">
+        <img src="img/hosted-notice.png" width="1280" height="800" alt="The editor on a hosted address, with a card saying this is a hosted copy and to run it on your own computer" loading="lazy">
+        <figcaption>A hosted copy says so, and asks you to run it on your own computer.</figcaption>
+      </figure>
+    </section>
+
+    <section id="features">
+      <h2>What you get</h2>
+      <p class="sub">One plain-text file, one set of choices, three kinds of output.</p>
+      <div class="grid">
+        <div class="card"><h3>Live preview</h3><p>Write on the left, see the finished page on the right, in the template you picked. Light and dark theme.</p></div>
+        <div class="card"><h3>PDF, Word, PowerPoint</h3><p>Export the same Markdown three ways. The PDF is the careful one: embedded fonts, exact page size, sensible page breaks.</p></div>
+        <div class="card"><h3>Page control</h3><p>Any paper size or your own (<code>100x150mm</code>), one continuous page, fit wide tables, your own margin. Each document remembers its settings.</p></div>
+        <div class="card"><h3>Import</h3><p>Bring in a PDF, Word file, web page, EPUB or Google Drive document as Markdown and tidy it up.</p></div>
+        <div class="card"><h3>Good code blocks</h3><p>Over 190 languages coloured the way an editor does it, with a small language label. Long lines wrap in print.</p></div>
+        <div class="card"><h3>Your documents stay yours</h3><p>Saved in the browser, with a crash buffer and optional sync to a file on disk. No account, no upload, no tracking.</p></div>
+      </div>
+    </section>
+
+    <section id="templates">
+      <h2>Templates</h2>
+      <p class="sub">Two to start with. Adding another is one file.</p>
+      <div class="two">
+        <div class="card tpl"><h3>Unbranded <code>unbranded</code></h3><p>A classic, quiet document with a title page. The default, and the smallest working example if you want to write your own.</p></div>
+        <div class="card tpl"><h3>Dealmobile <code>dealmobile</code></h3><p>A magazine article. Heavy grotesque headlines over a Caslon text face, one red accent, a running head and foot, and no logo.</p></div>
+      </div>
+    </section>
+
+    <section id="run-it">
+      <h2>Run it</h2>
+      <p class="sub">The editor needs a web server and Chrome or Edge. The PDF service needs Node 22.</p>
+      <pre>git clone &lt;your copy of the repository&gt; printmd
+cd printmd
+python3 -m http.server 8080        # then open http://localhost:8080</pre>
+      <pre>npm --prefix server ci
+npx --prefix server playwright install chromium
+npm --prefix server run start:local
+
+curl -s -X POST 'http://127.0.0.1:8787/api/v1/render?template=dealmobile' \
+  -H 'Content-Type: text/markdown' --data-binary @notes.md -o notes.pdf</pre>
+      <p class="sub">The PDF service is not available when hosted. It will not start on anything but 127.0.0.1.</p>
+    </section>
+
+    <section id="blog">
+      <h2>From the blog</h2>
+      <p class="sub">Why it exists and how the parts work.</p>
+      <ul class="posts">
+        <li><a href="../blog/why-i-built-printmd.md">Why I built PrintMD</a><span>Notes that look designed, without a word processor.</span></li>
+        <li><a href="../blog/print-quality-pdfs-from-a-browser.md">Print-quality PDFs from a browser</a><span>What it takes for a browser's PDF to hold up on paper.</span></li>
+        <li><a href="../blog/page-options-custom-size-continuous-fit.md">Custom sizes, one long page and fit to width</a><span>The page options and the edge cases behind them.</span></li>
+        <li><a href="../blog/a-pdf-service-that-only-runs-on-your-machine.md">A PDF service that only runs on your machine</a><span>Why the service refuses to be hosted, and how it stays safe.</span></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>PrintMD is open source under the MIT licence. Fonts and libraries keep their own licences.</p>
+  </footer>
+</div>
+</body>
+</html>

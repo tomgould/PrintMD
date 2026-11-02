@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF Importer Layout Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>PDF importer on real-world layouts: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<div id="preview-sandbox" hidden></div>
+
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script type="module">
+    // Untagged PDFs laid out like real documents, all text invented
+    // (tests/fixtures/build-pdfs.mjs): a serif article with a long sidebar, and a
+    // tall page with columns side by side.
+    import * as pdfImport from '../js/pdf-import.js';
+    import * as md from '../js/markdown.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTERS_PDF_LAYOUT');
+    md.configureMarked();
+
+    const imports = new Map();
+    /** Import a fixture once: {md, warnings, dom} where dom is the rendered preview. */
+    function load(name) {
+        if (!imports.has(name)) {
+            imports.set(name, (async () => {
+                const blob = await (await fetch('fixtures/' + name)).blob();
+                const warnings = [];
+                const out = await pdfImport.pdfToMarkdown(new File([blob], name, {type: 'application/pdf'}), null,
+                    {onWarning: (w) => warnings.push(w)});
+                const dom = document.createElement('div');
+                dom.innerHTML = md.renderMarkdown(out);
+                return {md: out, warnings, dom};
+            })());
+        }
+        return imports.get(name);
+    }
+    const texts = (dom, sel) => [...dom.querySelectorAll(sel)].map(e => e.textContent.replace(/\s+/g, ' ').trim());
+    const show = (s) => JSON.stringify(s.length > 600 ? s.slice(0, 600) + '…' : s);
+
+    // ── A serif article with a sidebar ───────────────────────────────────────
+    const ARTICLE = 'article-sidebar.pdf';
+    const FIRST = 'Each widget has a name, a colour and a size';
+
+    h.test('article: proportional prose is not fenced as code', async () => {
+        const {md: out, dom} = await load(ARTICLE);
+        assert(!dom.querySelector('pre'), 'a code block in prose: ' + show(out));
+    });
+
+    h.test('article: the sidebar stays out of the body paragraphs', async () => {
+        const {md: out, dom} = await load(ARTICLE);
+        const paras = texts(dom, 'p');
+        const first = paras.find(p => p.includes(FIRST)) || '';
+        assert(first.includes('on a single card. Cards are never rubbed out') && first.endsWith('the day it arrived.'),
+            'first body paragraph not whole: ' + show(first));
+        for (const label of ['Updated', '4 June 2026', 'Length', '3 pages', 'Shelf 17']) {
+            const mixed = paras.find(p => p.includes(label) && /Each widget|single card|day it arrived|Ut enim|voluptate/.test(p));
+            assert(!mixed, `sidebar text "${label}" merged into the body: ${show(mixed || '')}`);
+            assert(out.includes(label), `sidebar text "${label}" lost`);
+        }
+    });
+
+    h.test('article: the running header and footer are dropped', async () => {
+        const {md: out} = await load(ARTICLE);
+        assert(!out.includes('Example Co.'), 'running header left in: ' + show(out));
+        assert(out.split('Notes on widget storage').length === 2, 'the header title repeats: ' + show(out));
+        assert(!/example\.com\/widgets\/storage|\b[12] ?\/ ?2\b/.test(out), 'running footer left in');
+    });
+
+    h.test('article: bold, italic and inline code survive', async () => {
+        const {md: out} = await load(ARTICLE);
+        for (const want of ['**blue widgets first**', '*arrival order*', '`widget.sort_key`']) {
+            assert(out.includes(want), `lacks ${want}: ${show(out)}`);
+        }
+    });
+
+    h.test('article: typographic quotes are kept', async () => {
+        const {md: out} = await load(ARTICLE);
+        assert(out.includes('“card”'), 'curly quotes lost: ' + show(out));
+    });
+
+    h.test('article: http and mailto link annotations become links', async () => {
+        const {md: out} = await load(ARTICLE);
+        assert(out.includes('The [sorting notes](<https://example.com/widgets/sorting>) cover'), 'web link lost: ' + show(out));
+        assert(out.includes('to [the widget desk](<mailto:widget-desk@example.com>),'), 'mailto link lost: ' + show(out));
+    });
+
+    h.test('article: the image is reported and leaves a placeholder', async () => {
+        const {md: out, warnings} = await load(ARTICLE);
+        assert(warnings.some(w => /^1 image not imported\b/.test(w)), 'warnings ' + JSON.stringify(warnings));
+        assert(out.split(pdfImport.IMAGE_PLACEHOLDER).length === 2, 'placeholder count: ' + show(out));
+        assert(out.indexOf(pdfImport.IMAGE_PLACEHOLDER) < out.indexOf(FIRST), 'placeholder out of place');
+    });
+
+    h.test('article: a ruled table of aligned columns becomes a table', async () => {
+        const {md: out, dom} = await load(ARTICLE);
+        const table = dom.querySelector('table');
+        assert(table, 'no table: ' + show(out));
+        assert(JSON.stringify(texts(table, 'th')) === '["Code","Size"]', 'header ' + JSON.stringify(texts(table, 'th')));
+        const rows = [...table.querySelectorAll('tbody tr')].map(tr => texts(tr, 'td'));
+        assert(rows.length === 4, 'rows ' + JSON.stringify(rows));
+        assert(JSON.stringify(rows[0]) === '["S1","Small enough to hold in one hand"]', 'row 1 ' + JSON.stringify(rows[0]));
+        assert(JSON.stringify(rows[3]) === '["S4","Arrives on a pallet with a forklift"]', 'row 4 ' + JSON.stringify(rows[3]));
+    });
+
+    h.test('article: a list item broken across the page stays one item, though the sidebar runs on beside it', async () => {
+        const {md: out, dom} = await load(ARTICLE);
+        assert(!/^\s*[-*]\s*$/m.test(out), 'empty bullet: ' + show(out));
+        const items = texts(dom, 'li');
+        assert(items.length === 5, 'items ' + JSON.stringify(items));
+        assert(items[1].startsWith('Ut enim ad minim veniam') && items[1].includes('reprehenderit in voluptate velit')
+            && items[1].endsWith('and ends here.'), 'item 2 split: ' + show(items[1]));
+        assert(items[4].startsWith('Temporibus autem'), 'item 5 ' + show(items[4]));
+    });
+
+    // ── A tall page with columns ─────────────────────────────────────────────
+    const TALL = 'layout-tall.pdf';
+
+    h.test('tall page: the banner title is the heading and nothing is fenced', async () => {
+        const {md: out, dom} = await load(TALL);
+        assert(texts(dom, 'h1')[0] === 'Widget Catalogue Setup', 'h1 ' + JSON.stringify(texts(dom, 'h1')));
+        assert(!dom.querySelector('pre'), 'a code block: ' + show(out));
+        assert(out.includes('A short guide for shop staff: add a widget to the catalogue'), 'lead lost');
+    });
+
+    h.test('tall page: two columns of prose are read one after the other', async () => {
+        const {md: out, dom} = await load(TALL);
+        const marks = ['Alpha column text begins here', 'Alpha column text ends here', 'Beta column text begins here', 'Beta column text ends here'];
+        const at = marks.map(m => out.indexOf(m));
+        assert(at.every(i => i >= 0) && at.every((v, i) => i === 0 || v > at[i - 1]), 'column order ' + JSON.stringify(at) + ' ' + show(out));
+        const glued = texts(dom, 'p').find(p => p.includes('Alpha') && p.includes('Beta'));
+        assert(!glued, 'columns interleaved: ' + show(glued || ''));
+        assert(!/[a-z][,.]?(?:Beta|Alpha)/.test(out.replace(/\s+/g, ' ')), 'words glued across the gutter');
+    });
+
+    h.test('tall page: numbered steps beside an image stay separate items, with bold', async () => {
+        const {md: out, dom} = await load(TALL);
+        const ol = dom.querySelector('ol');
+        assert(ol, 'no numbered list: ' + show(out));
+        const items = texts(ol, 'li');
+        assert(items.length === 3, 'items ' + JSON.stringify(items));
+        assert(items[0] === 'Catalogue screen → choose New Widget and type “Garden”', 'item 1 ' + show(items[0]));
+        assert(items[2] === 'Preview → press Check and read the warnings', 'item 3 ' + show(items[2]));
+        assert(JSON.stringify(texts(ol, 'strong')) === '["New Widget","Main Colour","Check"]', 'bold ' + JSON.stringify(texts(ol, 'strong')));
+    });
+
+    h.test('tall page: the caption and the column labels are not bullets or glued headings', async () => {
+        const {md: out, dom} = await load(TALL);
+        const cap = texts(dom, 'p').find(p => p.includes('label sits on'));
+        assert(cap && cap.startsWith('A green widget with a “Garden” label') && cap.endsWith('of the shop window.'), 'caption ' + show(cap || out));
+        assert(!texts(dom, 'li').some(t => t.includes('label sits on')), 'caption became a list item');
+        // The labels are letter-spaced, which pdf.js reads as "B A C K": kept in capitals, never spelled
+        // out, glued to the other column's label, or turned into a heading.
+        const flat = dom.textContent.replace(/\s+/g, ' ');
+        assert(!/B A C K|OFFICESHOP|Officeshop|S H O P/i.test(flat), 'labels glued: ' + show(out));
+        assert(/BACK ?OFFICE/.test(flat) && /SHOP ?FRONT/.test(flat), 'labels lost: ' + show(out));
+        assert(!texts(dom, 'h2, h3').some(t => /back ?office|shop ?front/i.test(t)), 'a label became a heading');
+    });
+
+    h.test('tall page: the image is reported with a placeholder', async () => {
+        const {md: out, warnings} = await load(TALL);
+        assert(warnings.some(w => /^1 image not imported\b/.test(w)), 'warnings ' + JSON.stringify(warnings));
+        assert(out.includes(pdfImport.IMAGE_PLACEHOLDER), 'no placeholder');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

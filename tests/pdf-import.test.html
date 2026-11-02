@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>pdf-import.js Tests</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background: #fafafa;
+        }
+
+        h1 {
+            font-size: 1.3rem;
+            margin-bottom: 4px;
+        }
+
+        .summary {
+            font-size: 0.9rem;
+            color: #555;
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+
+        th {
+            text-align: left;
+            padding: 8px 12px;
+            background: #333;
+            color: #fff;
+        }
+
+        td {
+            padding: 7px 12px;
+            border-bottom: 1px solid #e8e8e8;
+        }
+
+        tr.pass td:first-child::before {
+            content: "✓ ";
+            color: #22a663;
+            font-weight: 700;
+        }
+
+        tr.fail td:first-child::before {
+            content: "✗ ";
+            color: #cc2222;
+            font-weight: 700;
+        }
+
+        tr.pass {
+            background: #f0fff4;
+        }
+
+        tr.fail {
+            background: #fff0f0;
+        }
+
+        .detail {
+            color: #666;
+            font-size: 0.8rem;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+<h1>pdf-import.js: Unit Tests</h1>
+<p class="summary" id="summary">Running…</p>
+<table>
+    <thead>
+    <tr>
+        <th>Test</th>
+        <th>Expected</th>
+        <th>Detail</th>
+    </tr>
+    </thead>
+    <tbody id="results"></tbody>
+</table>
+
+<script type="module">
+    import {guessLang, logicalOrder, postProcess, removeRunningElements} from '../js/pdf-import.js';
+
+    const results = [];
+
+    // A test passes only on `true`; any other value is shown as the detail.
+    function test(name, fn) {
+        try {
+            const ok = fn();
+            results.push({name, pass: ok === true, detail: ok === true || ok === false ? '' : String(ok)});
+        } catch (e) {
+            results.push({name, pass: false, detail: e.message});
+        }
+    }
+
+    function eq(a, b) {
+        return a === b;
+    }
+
+    function includes(haystack, needle) {
+        return haystack.includes(needle);
+    }
+
+    // ── guessLang tests ────────────────────────────────────────────────────────
+    test('guessLang: JSON object', () => eq(guessLang('{"key": "value"}'), 'json'));
+    test('guessLang: JSON array', () => eq(guessLang('[{"id": 1}]'), 'json'));
+    test('guessLang: SQL SELECT', () => eq(guessLang('SELECT id FROM users WHERE id = 1'), 'sql'));
+    test('guessLang: Python def', () => eq(guessLang('def my_func(x):\n  return x'), 'python'));
+    test('guessLang: Python shebang', () => eq(guessLang('#!/usr/bin/env python3\nprint("hi")'), 'python'));
+    test('guessLang: JS const', () => eq(guessLang('const x = async () => {}'), 'js'));
+    test('guessLang: JS function', () => eq(guessLang('function foo() { return 1; }'), 'js'));
+    test('guessLang: PHP', () => eq(guessLang('<?php echo "hello"; ?>'), 'php'));
+    test('guessLang: TypeScript', () => eq(guessLang('interface Foo { name: string; }'), 'ts'));
+    test('guessLang: CSS', () => eq(guessLang(':root { --color: red; }'), 'css'));
+    test('guessLang: Bash', () => eq(guessLang('if [ -f file ]; then echo ok; fi'), 'bash'));
+    test('guessLang: Rust fn', () => eq(guessLang('fn main() -> () { let mut x = 1; }'), 'rust'));
+    test('guessLang: Go func', () => eq(guessLang('func main() { x := 5 }'), 'go'));
+    test('guessLang: unknown', () => eq(guessLang('hello world'), ''));
+    test('guessLang: PHP with JS-like keywords is PHP', () => eq(guessLang('<?php\nfunction total($items) {\n    return count($items);\n}'), 'php'));
+    test('guessLang: PHP method call is not Rust', () => eq(guessLang('$this->save() {'), 'php'));
+    test('guessLang: arrow in JS is not Rust', () => eq(guessLang('const f = (a) => {\n  return a->b;\n}'), 'js'));
+    test('guessLang: Rust impl / use', () => eq(guessLang('use std::io;\nimpl Reader for File {\n}'), 'rust'));
+    test('guessLang: Rust generic fn', () => eq(guessLang('pub fn parse<T>(input: &str) -> T {'), 'rust'));
+
+    // ── postProcess tests ──────────────────────────────────────────────────────
+    test('postProcess: ligature fi', () => includes(postProcess('ﬁle'), 'file'));
+    test('postProcess: ligature fl', () => includes(postProcess('ﬂoat'), 'float'));
+    test('postProcess: soft hyphen', () => !postProcess('soft\u00ADhyphen').includes('\u00AD'));
+    test('postProcess: zero-width', () => !postProcess('a\u200Bb').includes('\u200B'));
+    test('postProcess: BOM removed', () => postProcess('\uFEFFa\uFEFFb') === 'ab');
+    test('postProcess: ZWNJ and ZWJ kept (Persian, Indic)', () =>
+        postProcess('\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645') === '\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645' &&
+        postProcess('\u0915\u094D\u200D\u0937') === '\u0915\u094D\u200D\u0937');
+    test('postProcess: curly quotes are kept', () => includes(postProcess('\u201CHello\u201D'), '\u201CHello\u201D'));
+    test('postProcess: collapse 3 newlines', () => !postProcess('a\n\n\nb').includes('\n\n\n'));
+    test('postProcess: body text that mentions page furniture stays (only the header/footer band drops it)', () =>
+        postProcess('content\nAll rights reserved by the authors.\npage 3\nmore') === 'content\nAll rights reserved by the authors.\npage 3\nmore');
+
+    // \u2500\u2500 removeRunningElements: header/footer band only \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    const line = (text, pageNum, pageY, extra = {}) => ({text, pageNum, pageY, pageHeight: 800, isMono: false, ...extra});
+    test('removeRunningElements: repeated header and page numbers in the band go', () => {
+        const lines = [];
+        for (let p = 1; p <= 4; p++) {
+            lines.push(line('Quarterly Report', p, 30), line(`Body text ${p}`, p, 300), line(`Page ${p} of 4`, p, 780));
+        }
+        const kept = removeRunningElements(lines, 4).map(l => l.text);
+        return JSON.stringify(kept) === JSON.stringify(['Body text 1', 'Body text 2', 'Body text 3', 'Body text 4']) || kept.join('|');
+    });
+    test('removeRunningElements: the same text in the body stays', () => {
+        const lines = [];
+        for (let p = 1; p <= 4; p++) lines.push(line('Quarterly Report', p, 400), line('All rights reserved.', p, 420));
+        return removeRunningElements(lines, 4).length === 8;
+    });
+    test('removeRunningElements: code-like lines in the band stay', () => {
+        const lines = [];
+        for (let p = 1; p <= 4; p++) lines.push(line('}', p, 770, {isMono: true}), line('return null;', p, 40));
+        return removeRunningElements(lines, 4).length === 8;
+    });
+    test('removeRunningElements: a page number in the band of a one-page PDF goes', () =>
+        removeRunningElements([line('Title', 1, 100), line('1', 1, 790)], 1).map(l => l.text).join() === 'Title');
+
+    // \u2500\u2500 logicalOrder: right-to-left lines \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    const it = (str, dir) => ({str, dir});
+    test('logicalOrder: an RTL line reads right to left', () =>
+        logicalOrder([it('c', 'rtl'), it(' ', 'ltr'), it('b', 'rtl'), it('a', 'rtl')], 'rtl').map(i => i.str).join('') === 'ab c');
+    test('logicalOrder: a Latin run inside an RTL line keeps its order', () =>
+        logicalOrder([it('\u05D0', 'rtl'), it(' ', 'ltr'), it('PDF', 'ltr'), it(' ', 'ltr'), it('v6', 'ltr'), it(' ', 'ltr'), it('\u05D1', 'rtl')], 'rtl')
+            .map(i => i.str).join('') === '\u05D1 PDF v6 \u05D0');
+    test('logicalOrder: a 300,000-item RTL line with a long Latin run does not overflow the stack', () => {
+        const items = [it('א', 'rtl')];
+        for (let i = 0; i < 300000; i++) items.push(it('a', 'ltr'));
+        items.push(it('ב', 'rtl'));
+        const out = logicalOrder(items, 'rtl');
+        return (out.length === items.length && out[0].str === 'ב' && out[out.length - 1].str === 'א') || 'length ' + out.length;
+    });
+    test('logicalOrder: an LTR line is unchanged', () =>
+        logicalOrder([it('a', 'ltr'), it('b', 'ltr')], 'ltr').map(i => i.str).join('') === 'ab');
+    test('postProcess: H1 guarantee, promote H2', () => {
+        const result = postProcess('## My Title\n\nSome text');
+        return result.startsWith('# My Title');
+    });
+    test('postProcess: H1 kept when present', () => {
+        const result = postProcess('# Real Title\n\n## Sub');
+        return result.startsWith('# Real Title');
+    });
+    test('postProcess: trim excess whitespace', () => {
+        const result = postProcess('  \n\n\ntext\n\n\n');
+        return result === 'text';
+    });
+
+    // The 1 MB hostile-input fuzz lives in importers-pdf.test.html, which loads the
+    // same startup scripts as the app (their polyfills change built-ins such as trim).
+
+    // ── Render results ─────────────────────────────────────────────────────────
+    const tbody = document.getElementById('results');
+    let pass = 0, fail = 0;
+    for (const r of results) {
+        const tr = document.createElement('tr');
+        tr.className = r.pass ? 'pass' : 'fail';
+        tr.innerHTML = `<td>${r.name}</td><td>${r.pass ? 'pass' : 'FAIL'}</td><td class="detail">${r.detail}</td>`;
+        tbody.appendChild(tr);
+        r.pass ? pass++ : fail++;
+    }
+    const s = document.getElementById('summary');
+    s.textContent = `${pass} passed · ${fail} failed · ${results.length} total`;
+    s.style.color = fail > 0 ? '#cc2222' : '#22a663';
+</script>
+</body>
+</html>

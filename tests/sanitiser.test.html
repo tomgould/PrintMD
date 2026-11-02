@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sanitiser Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>Sanitiser (js/markdown.js) tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as md from '../js/markdown.js';
+    import * as pdfExport from '../js/pdf-export.js';
+    import * as pipeline from '../js/export-pipeline.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('SANITISER');
+    md.configureMarked();
+
+    /** Render through the app's Markdown path and return a parsed fragment. */
+    function render(source, opts) {
+        const html = md.renderMarkdown(source, opts);
+        const box = document.createElement('div');
+        box.innerHTML = html;
+        return {html, box};
+    }
+
+    const YT = 'https://www.youtube.com/embed/dQw4w9WgXcQ';
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+    // ── iframes ──────────────────────────────────────────────────────────────
+    h.test('allow-listed YouTube iframe is kept with its src', () => {
+        const {box} = render(`<iframe src="${YT}" width="560" height="315" title="Video" allowfullscreen></iframe>`);
+        const f = box.querySelector('iframe');
+        assert(f, 'iframe kept');
+        assert(f.getAttribute('src') === YT, 'src kept: ' + f.getAttribute('src'));
+        assert(f.getAttribute('width') === '560' && f.getAttribute('height') === '315', 'size kept');
+        assert(f.getAttribute('title') === 'Video', 'title kept');
+        assert(f.hasAttribute('allowfullscreen'), 'allowfullscreen kept');
+    });
+
+    h.test('Vimeo, youtube-nocookie and Google Docs embeds are allowed', () => {
+        for (const src of ['https://player.vimeo.com/video/1', 'https://www.youtube-nocookie.com/embed/x',
+            'https://youtube.com/embed/x', 'https://docs.google.com/document/d/e/abc/pub?embedded=true']) {
+            const {box} = render(`<iframe src="${src}"></iframe>`);
+            assert(box.querySelector('iframe'), 'kept: ' + src);
+        }
+    });
+
+    h.test('full-screen fixed iframe overlay loses its style and gets forced attributes', () => {
+        const {box} = render(`<iframe src="${YT}" style="position:fixed;inset:0;width:100vw;height:100vh;z-index:2147483647" ` +
+            `srcdoc="<script>alert(1)<\/script>" onload="alert(1)" name="x" allow="camera; microphone" frameborder="0" ` +
+            `sandbox="allow-top-navigation allow-forms" referrerpolicy="unsafe-url" loading="eager"></iframe>`);
+        const f = box.querySelector('iframe');
+        assert(f, 'iframe kept (allow-listed host)');
+        for (const a of ['style', 'srcdoc', 'onload', 'name', 'allow', 'frameborder']) {
+            assert(!f.hasAttribute(a), `attribute ${a} removed`);
+        }
+        assert(f.getAttribute('sandbox') === 'allow-scripts allow-same-origin allow-presentation allow-popups',
+            'sandbox forced: ' + f.getAttribute('sandbox'));
+        assert(f.getAttribute('referrerpolicy') === 'no-referrer', 'referrerpolicy forced');
+        assert(f.getAttribute('loading') === 'lazy', 'loading forced');
+    });
+
+    h.test('iframe to a non-allow-listed host is removed', () => {
+        for (const src of ['https://evil.example.com/x', 'https://www.youtube.com.evil.com/embed/x',
+            'https://evil.com/?u=https://www.youtube.com/', 'https://www.youtube.com@evil.com/embed/x',
+            'https://youtube.com:8443/embed/x', '//www.youtube.com/embed/x', '/local/page.html', '']) {
+            const {box} = render(`<p>a</p><iframe src="${src}"></iframe>`);
+            assert(!box.querySelector('iframe'), 'removed: ' + src);
+        }
+        const {box} = render('<iframe srcdoc="<b>x</b>"></iframe>');
+        assert(!box.querySelector('iframe'), 'iframe without src removed');
+    });
+
+    h.test('iframe with an http src is removed', () => {
+        const {box} = render('<iframe src="http://www.youtube.com/embed/x"></iframe>');
+        assert(!box.querySelector('iframe'), 'http iframe removed');
+    });
+
+    h.test('iframe with javascript: or data: src is removed', () => {
+        for (const src of ['javascript:alert(1)', 'data:text/html,<script>alert(1)<\/script>']) {
+            const {box} = render(`<iframe src="${src}"></iframe>`);
+            assert(!box.querySelector('iframe'), 'removed: ' + src);
+        }
+    });
+
+    h.test('allowIframes:false removes every iframe', () => {
+        const {box} = render(`<iframe src="${YT}"></iframe><p>text</p>`, {allowIframes: false});
+        assert(!box.querySelector('iframe'), 'iframe removed');
+        assert(box.querySelector('p'), 'other content kept');
+        const again = render(`<iframe src="${YT}"></iframe>`);
+        assert(again.box.querySelector('iframe'), 'default still allows iframes afterwards');
+    });
+
+    // ── Forms, style, scripts, handlers ──────────────────────────────────────
+    h.test('form with a password input is removed', () => {
+        const {box} = render('<form action="https://evil.example.com/steal" method="post"><input type="password" name="pw">' +
+            '<input type="text" name="user"><button type="submit">Log in</button><select><option>a</option></select>' +
+            '<textarea>x</textarea></form>');
+        for (const sel of ['form', 'input', 'button', 'select', 'option', 'textarea']) {
+            assert(!box.querySelector(sel), `${sel} removed`);
+        }
+    });
+
+    h.test('task-list checkboxes still render, disabled', () => {
+        const {box} = render('- [x] done\n- [ ] todo\n');
+        const boxes = box.querySelectorAll('input[type="checkbox"]');
+        assert(boxes.length === 2, 'two checkboxes, got ' + boxes.length);
+        assert([...boxes].every(b => b.disabled), 'checkboxes disabled');
+        assert(boxes[0].checked && !boxes[1].checked, 'checked state kept');
+        const raw = render('<input type="checkbox" name="x" value="y" form="f" onclick="alert(1)">').box.querySelector('input');
+        assert(raw && raw.disabled && !raw.hasAttribute('name') && !raw.hasAttribute('form') && !raw.hasAttribute('onclick'),
+            'raw checkbox forced disabled and stripped');
+    });
+
+    h.test('<style> that hides the app is removed', () => {
+        // A leading <style> is dropped by DOMPurify's own parsing; one after content is not.
+        for (const src of ['<style>body { display: none !important }</style>\n\nText',
+            'Text\n\n<style>body, #editor, #toolbar-nav { display: none !important }</style>',
+            '<div><style>* { visibility: hidden }</style></div>',
+            '<svg><style>* { display: none }</style></svg>']) {
+            const {box, html} = render(src);
+            assert(!box.querySelector('style'), 'style element removed: ' + src);
+            assert(!/display:\s*none|visibility:\s*hidden/.test(html), 'css text not left behind: ' + html);
+        }
+    });
+
+    h.test('<script>, <link>, <meta>, <base>, <object>, <embed> are removed', () => {
+        const {box} = render('<script>alert(1)<\/script><link rel="stylesheet" href="https://evil.example.com/x.css">' +
+            '<meta http-equiv="refresh" content="0;url=https://evil.example.com"><base href="https://evil.example.com/">' +
+            '<object data="x.swf"></object><embed src="x.swf">');
+        for (const sel of ['script', 'link', 'meta', 'base', 'object', 'embed']) {
+            assert(!box.querySelector(sel), `${sel} removed`);
+        }
+    });
+
+    h.test('javascript:, vbscript: and data:text/html links lose their href', () => {
+        const cases = ['[a](javascript:alert(1))', '<a href="javascript:alert(1)">b</a>', '<a href="JaVaScRiPt:alert(1)">c</a>',
+            '<a href=" javascript:alert(1)">d</a>', '<a href="java&#x09;script:alert(1)">e</a>', '<a href="vbscript:msgbox(1)">f</a>',
+            '<a href="data:text/html,<script>alert(1)<\/script>">g</a>', '[h](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)'];
+        for (const src of cases) {
+            const {box} = render(src);
+            const a = box.querySelector('a');
+            const href = a ? (a.getAttribute('href') || '') : '';
+            assert(!/^\s*(javascript|vbscript|data):/i.test(href.replace(/[\t\n\r]/g, '')), `${src} -> href ${href}`);
+        }
+    });
+
+    h.test('data: image src is kept', () => {
+        const {box} = render(`![dot](${PNG})`);
+        const img = box.querySelector('img');
+        assert(img && img.getAttribute('src') === PNG, 'data image kept');
+    });
+
+    h.test('onerror / onload / onclick handlers are removed', () => {
+        const {box} = render('<img src="x" onerror="alert(1)"><div onclick="alert(1)" onmouseover="alert(1)">x</div>' +
+            '<body onload="alert(1)"><details open ontoggle="alert(1)">y</details>');
+        for (const el of box.querySelectorAll('*')) {
+            for (const attr of el.attributes) assert(!/^on/i.test(attr.name), `${el.tagName} kept ${attr.name}`);
+        }
+    });
+
+    h.test('svg script and svg handlers are removed', () => {
+        const {box, html} = render('<svg><script>alert(1)<\/script><a xlink:href="javascript:alert(1)"><text>x</text></a></svg>' +
+            '<svg onload="alert(1)"><animate onbegin="alert(1)" attributeName="x"/></svg>');
+        assert(!box.querySelector('script'), 'no script');
+        assert(!/onload|onbegin|javascript:/i.test(html), 'no handlers or javascript: urls: ' + html);
+    });
+
+    // ── Links ────────────────────────────────────────────────────────────────
+    h.test('external links open in a new tab with rel noopener noreferrer', () => {
+        const {box} = render('[ext](https://example.com) <a href="https://example.org" target="_self" rel="opener">raw</a>');
+        const links = box.querySelectorAll('a');
+        assert(links.length === 2, 'two links');
+        for (const a of links) {
+            assert(a.getAttribute('target') === '_blank', 'target _blank on ' + a.href);
+            const rel = (a.getAttribute('rel') || '').split(/\s+/);
+            assert(rel.includes('noopener') && rel.includes('noreferrer') && !rel.includes('opener'), 'rel: ' + a.getAttribute('rel'));
+        }
+    });
+
+    h.test('a target=_blank link without rel gets noopener noreferrer', () => {
+        const {box} = render('<a href="https://example.com" target="_blank">x</a>');
+        const rel = (box.querySelector('a').getAttribute('rel') || '').split(/\s+/);
+        assert(rel.includes('noopener') && rel.includes('noreferrer'), 'rel added');
+    });
+
+    h.test('#anchor links stay in-page (no target)', () => {
+        const {box} = render('[jump](#section-two)');
+        const a = box.querySelector('a');
+        assert(a.getAttribute('href') === '#section-two', 'href kept');
+        assert(!a.hasAttribute('target'), 'no target on anchor link');
+    });
+
+    h.test('links inside SVG cannot navigate the page', async () => {
+        const {html} = render('<p>x</p><svg width="100" height="40"><a href="/tests/index.html?nav=href"><rect width="100" height="40"/></a></svg>' +
+            '<svg width="100" height="40"><a xlink:href="/tests/index.html?nav=xlink"><rect width="100" height="40"/></a></svg>' +
+            '<svg width="100" height="40"><a xlink:href="#editor"><rect width="100" height="40"/></a></svg>');
+        const frame = document.createElement('iframe');
+        frame.style.cssText = 'width:400px;height:300px;border:0;position:absolute;left:-9999px';
+        frame.srcdoc = '<!DOCTYPE html><html><body>' + html + '</body></html>';
+        const loaded = new Promise(res => frame.addEventListener('load', res, {once: true}));
+        document.body.appendChild(frame);
+        await loaded;
+        try {
+            const d = frame.contentDocument;
+            const anchors = [...d.querySelectorAll('svg a')];
+            for (const a of anchors) {
+                assert(!a.hasAttribute('href') && !a.hasAttributeNS('http://www.w3.org/1999/xlink', 'href'),
+                    'svg link target removed: ' + a.outerHTML);
+                a.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: frame.contentWindow}));
+            }
+            await new Promise(r => setTimeout(r, 400));
+            assert(frame.contentWindow.location.href === 'about:srcdoc', 'frame navigated to ' + frame.contentWindow.location.href);
+        } finally {
+            frame.remove();
+        }
+    });
+
+    // ── Headings ─────────────────────────────────────────────────────────────
+    h.test('escaped HTML in a heading stays text (no live image)', () => {
+        const {box} = render('## Example: \\<img src="/beacon?h">');
+        const h2 = box.querySelector('h2');
+        assert(!box.querySelector('img'), 'no img element: ' + box.innerHTML);
+        assert(h2.textContent === 'Example: <img src="/beacon?h">', 'literal text: ' + JSON.stringify(h2.textContent));
+    });
+
+    h.test('heading text renders inline Markdown and escapes without backslashes', () => {
+        const {box} = render('## A \\* star, **bold** and `code`');
+        const h2 = box.querySelector('h2');
+        assert(h2.querySelector('strong') && h2.querySelector('code'), 'inline markup rendered: ' + h2.innerHTML);
+        assert(h2.textContent === 'A * star, bold and code', 'text: ' + JSON.stringify(h2.textContent));
+    });
+
+    h.test('heading ids are unchanged', () => {
+        assert(render('## Hello World').box.querySelector('h2').id === 'hello-world', 'plain heading id');
+        assert(render('## Paragraphs & Line Breaks').box.querySelector('h2').id === 'paragraphs--line-breaks', 'id keeps double hyphen');
+    });
+
+    const headingIds = (source) => [...render(source).box.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(el => el.id);
+
+    h.test('heading ids come from the plain text, not the Markdown or HTML source', () => {
+        const cases = [
+            ['## &lt;img&gt; tag', 'img-tag'],
+            ['## Use \\<img\\> tags', 'use-img-tags'],
+            ['## [Link](https://example.com/a?b=1) here', 'link-here'],
+            ['## The `render()` call', 'the-render-call'],
+            ['## Salt &amp; Pepper', 'salt--pepper'],
+            ['## **Bold** move', 'bold-move'],
+        ];
+        for (const [src, want] of cases) {
+            const [got] = headingIds(src);
+            assert(got === want, `${src} -> ${got}, want ${want}`);
+        }
+    });
+
+    h.test('heading ids keep letters from any script', () => {
+        assert(headingIds('## Café Überblick')[0] === 'café-überblick', headingIds('## Café Überblick')[0]);
+        assert(headingIds('## 日本語の見出し')[0] === '日本語の見出し', headingIds('## 日本語の見出し')[0]);
+    });
+
+    h.test('an NFD heading and an NFC link (and the reverse) meet on one NFC id', () => {
+        const nfd = 'Cafe\u0301';
+        const {box} = render(`## ${nfd}\n\n[nfc](#caf\u00e9) [nfd](#cafe\u0301)`);
+        const id = box.querySelector('h2').id;
+        assert(id === 'caf\u00e9', 'heading id is NFC: ' + JSON.stringify(id));
+        const targets = [...box.querySelectorAll('a')].map(a => decodeURIComponent(a.getAttribute('href').slice(1)));
+        assert(targets.every(t => t === id), 'links point at the id: ' + JSON.stringify(targets));
+    });
+
+    h.test('headings with no letters or digits get section-N', () => {
+        const ids = headingIds('## !!!\n\n## ???\n');
+        assert(ids.join() === 'section-1,section-2', ids.join());
+    });
+
+    h.test('duplicate headings get -1, -2, and each render starts again', () => {
+        const ids = headingIds('# Notes\n\n## Notes\n\n### Notes\n');
+        assert(ids.join() === 'notes,notes-1,notes-2', ids.join());
+        assert(headingIds('## Notes')[0] === 'notes', 'second render starts from scratch');
+    });
+
+    h.test('an id equal to an app element id gets h-, and #links to it follow', () => {
+        const {box} = render('## Editor\n\n[jump](#editor) [other](#editorial)\n\n<div id="preview">raw</div>\n\n<a href="#sidebar">s</a>');
+        assert(box.querySelector('h2').id === 'h-editor', 'heading id: ' + box.querySelector('h2').id);
+        const hrefs = [...box.querySelectorAll('a')].map(a => a.getAttribute('href'));
+        assert(hrefs.join() === '#h-editor,#editorial,#h-sidebar', 'hrefs: ' + hrefs.join());
+        assert(box.querySelector('div').id === 'h-preview', 'raw HTML id: ' + box.querySelector('div').id);
+    });
+
+    h.test('ids do not depend on what is already in the page (an <img name> in the live document)', () => {
+        const live = document.createElement('div');
+        document.body.appendChild(live);
+        try {
+            const source = '<img name="zzz" src="' + PNG + '" alt="">\n\n# Zzz\n';
+            const ids = [];
+            for (let i = 0; i < 3; i++) {
+                live.innerHTML = md.renderMarkdown(source);   // the previous render is in the page, as in the preview
+                ids.push(live.querySelector('h1').id);
+            }
+            assert(ids.join() === 'zzz,zzz,zzz', 'same id every render: ' + ids.join());
+            assert(live.querySelector('img').getAttribute('name') === 'zzz', 'img name kept');
+        } finally {
+            live.remove();
+        }
+    });
+
+    h.test('a name or id that shadows a document property is prefixed, never clobbers the page', () => {
+        const live = document.createElement('div');
+        document.body.appendChild(live);
+        try {
+            live.innerHTML = md.renderMarkdown('<img name="getElementById" src="' + PNG + '" alt=""><img id="cookie" src="' + PNG + '" alt="">');
+            const [a, b] = live.querySelectorAll('img');
+            assert(a.getAttribute('name') === 'h-getElementById', 'name: ' + a.getAttribute('name'));
+            assert(b.id === 'h-cookie', 'id: ' + b.id);
+            assert(typeof document.getElementById === 'function', 'document.getElementById intact');
+            assert(typeof document.cookie === 'string', 'document.cookie intact');
+        } finally {
+            live.remove();
+        }
+    });
+
+    h.test('#links to the -1, -2 forms of a prefixed id follow the prefix', () => {
+        const {box} = render('## Links\n\n## Links\n\n## Editor\n\n## Editor\n\n[a](#links-1) [b](#editor-1) [c](#editor-x)');
+        const ids = [...box.querySelectorAll('h2')].map(el => el.id);
+        assert(ids.join() === 'h-links,h-links-1,h-editor,h-editor-1', 'ids: ' + ids.join());
+        const hrefs = [...box.querySelectorAll('a')].map(a => a.getAttribute('href'));
+        assert(hrefs.join() === '#h-links-1,#h-editor-1,#editor-x', 'hrefs: ' + hrefs.join());
+    });
+
+    h.test('ids DOMPurify would drop as DOM clobbering (links, title, style) get h- instead', () => {
+        const {box} = render('- [Links](#links)\n- [Title](#title)\n\n## Links\n\n## Title\n\n## Style\n\n<div id="images">raw</div>');
+        const ids = [...box.querySelectorAll('[id]')].map(el => el.id);
+        assert(ids.join() === 'h-links,h-title,h-style,h-images', 'ids: ' + ids.join());
+        const hrefs = [...box.querySelectorAll('a')].map(a => a.getAttribute('href'));
+        assert(hrefs.join() === '#h-links,#h-title', 'hrefs: ' + hrefs.join());
+    });
+
+    // ── Template transformHTML output ───────────────────────────────────────
+    const hostileTemplate = {
+        id: 'hostile',
+        transformHTML: (html) => html + '<img src="x" onerror="alert(1)"><iframe src="https://evil.example.com/"></iframe>' +
+            '<style>body{display:none}</style><a href="javascript:alert(1)">x</a><form><input type="password"></form>',
+    };
+
+    h.test('template transformHTML output is re-sanitised (preview path)', () => {
+        const out = md.applyTemplateTransform(md.renderMarkdown('# Title'), hostileTemplate);
+        const box = document.createElement('div');
+        box.innerHTML = out;
+        assert(box.querySelector('h1'), 'content kept');
+        assert(!box.querySelector('iframe, style, form, input'), 'hostile elements removed: ' + out);
+        assert(!/onerror|javascript:/i.test(out), 'handler and javascript: href removed: ' + out);
+    });
+
+    h.test('template transformHTML output is re-sanitised with the same options (allowIframes:false)', () => {
+        const t = {transformHTML: (html) => html + `<iframe src="${YT}"></iframe>`};
+        assert(!/iframe/.test(md.applyTemplateTransform('<p>x</p>', t, {allowIframes: false})), 'iframe removed');
+        assert(/iframe/.test(md.applyTemplateTransform('<p>x</p>', t)), 'iframe kept by default');
+    });
+
+    h.test('template without transformHTML passes HTML through unchanged', () => {
+        const html = md.renderMarkdown('# Hi');
+        assert(md.applyTemplateTransform(html, {}) === html, 'unchanged');
+        assert(md.applyTemplateTransform(html, null) === html, 'null template');
+    });
+
+    h.test('sanitizeHTML is exported and uses the same configuration', () => {
+        const out = md.sanitizeHTML(`<style>x</style><iframe src="https://evil.example.com"></iframe><iframe src="${YT}"></iframe>`);
+        assert(!/<style|evil/.test(out), 'removed hostile parts: ' + out);
+        assert(/sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"/.test(out), 'allowed iframe forced: ' + out);
+    });
+
+    h.test('PDF export re-sanitises transformHTML output before writing the print window', async () => {
+        let written = '';
+        const fakeWin = {
+            closed: false,
+            document: {
+                readyState: 'loading',
+                fonts: {ready: Promise.resolve()},
+                open() {}, write(s) { written += s; },
+                close() { this.readyState = 'complete'; },
+            },
+            addEventListener(type, fn) { if (type === 'load') setTimeout(fn, 0); }, removeEventListener() {}, focus() {}, print() {}, close() {},
+        };
+        const entry = {manifest: {id: 'hostile'}, styles: '', template: hostileTemplate};
+        await pdfExport.exportPDF(pipeline.prepareExport('# Body', entry), entry, {openWindow: () => fakeWin});
+        assert(written.includes('Body'), 'body written');
+        const body = written.slice(written.indexOf('<body>'));
+        assert(!/onerror|javascript:|evil\.example|type="password"/i.test(body), 'hostile parts removed from print HTML');
+        assert(!/<style/i.test(body), 'no style element in the body');
+    });
+
+    // ── Code blocks (js/code-languages.js) ──────────────────────────────────
+    h.test('a labelled code block keeps data-lang and data-lang-id through the sanitiser', () => {
+        const {box} = render('```php\n<?php echo 1;\n```\n\n```terraform\nresource "a" "b" {}\n```');
+        const [php, tf] = box.querySelectorAll('pre');
+        assert(php.getAttribute('data-lang') === 'PHP' && php.getAttribute('data-lang-id') === 'php', php.outerHTML);
+        assert(php.querySelector('code.hljs.language-php span[class^="hljs-"]'), 'PHP tokens: ' + php.innerHTML);
+        assert(tf.getAttribute('data-lang') === 'Terraform', 'vendored-module language: ' + tf.outerHTML);
+        assert(tf.querySelector('.hljs-keyword'), 'HCL grammar loaded in the browser: ' + tf.innerHTML);
+        assert(php.textContent === '<?php echo 1;', 'the label is not text: ' + JSON.stringify(php.textContent));
+    });
+
+    h.test('an unlabelled or hostile fence gives a plain block with no label', () => {
+        const {box} = render('```\nconst a = 1;\n```\n\n```js" onmouseover="alert(1)\nx\n```');
+        for (const pre of box.querySelectorAll('pre')) {
+            assert(!pre.hasAttribute('data-lang') && !pre.hasAttribute('data-lang-id'), pre.outerHTML);
+            assert(!pre.querySelector('span'), 'not highlighted: ' + pre.innerHTML);
+            assert(!/onmouseover/i.test(pre.outerHTML), 'the info string goes nowhere: ' + pre.outerHTML);
+        }
+    });
+
+    h.test('raw HTML data-lang values outside the label character set are removed; handlers still go', () => {
+        const {box} = render('<pre data-lang="PHP" data-lang-id="php" onclick="alert(1)">a</pre>\n\n'
+            + '<pre data-lang="&lt;b&gt;x" data-lang-id="Bad Id">b</pre>\n\n'
+            + `<p data-lang="${'L'.repeat(25)}" data-lang-id="ok">c</p>`);
+        const [good, bad] = box.querySelectorAll('pre');
+        assert(good.getAttribute('data-lang') === 'PHP' && good.getAttribute('data-lang-id') === 'php', 'valid raw values kept');
+        assert(!good.hasAttribute('onclick'), 'onclick removed');
+        assert(!bad.hasAttribute('data-lang') && !bad.hasAttribute('data-lang-id'), 'invalid values removed: ' + bad.outerHTML);
+        const p = box.querySelector('p');
+        assert(!p.hasAttribute('data-lang') && p.getAttribute('data-lang-id') === 'ok', 'over-long label removed: ' + p.outerHTML);
+    });
+
+    h.test('the code-block label is generated by template CSS and keeps the code text intact', async () => {
+        const {getTemplates} = await import('../js/templates.js');
+        const entry = getTemplates()[0];
+        const style = document.createElement('style');
+        style.textContent = entry.styles;
+        document.head.appendChild(style);
+        const host = document.createElement('div');
+        host.className = `template-${entry.manifest.id}`;
+        host.innerHTML = md.renderMarkdown('```jsonc\n{"a": 1}\n```');
+        document.body.appendChild(host);
+        try {
+            const pre = host.querySelector('pre');
+            const before = getComputedStyle(pre, '::before');
+            assert(before.content === '"JSONC"', 'label content: ' + before.content);
+            assert(before.textTransform === 'uppercase' && parseFloat(before.fontSize) <= 11, 'small capitals');
+            assert(getComputedStyle(pre).getPropertyValue('--bd-lang').trim() === '#cbcb41', 'JSON dot colour');
+            assert(pre.innerText.trim() === '{"a": 1}', 'innerText is the code only: ' + JSON.stringify(pre.innerText));
+        } finally {
+            host.remove();
+            style.remove();
+        }
+    });
+
+    // ── Preview containment (css/app.css) ───────────────────────────────────
+    h.test('fixed-position content in #preview cannot cover the app UI', async () => {
+        const frame = document.createElement('iframe');
+        frame.style.cssText = 'width:800px;height:600px;border:0;position:absolute;left:-9999px;top:0';
+        frame.srcdoc = '<!DOCTYPE html><html><head><link rel="stylesheet" href="../css/app.css"></head><body>' +
+            '<div style="height:300px">app chrome</div><div id="preview-pane" style="height:200px"><div id="preview">' +
+            '<div id="overlay" style="position:fixed;inset:0;width:100vw;height:100vh;z-index:2147483647;background:red"></div>' +
+            '</div></div></body></html>';
+        const loaded = new Promise(res => frame.addEventListener('load', res, {once: true}));
+        document.body.appendChild(frame);
+        await loaded;
+        try {
+            const d = frame.contentDocument;
+            const preview = d.getElementById('preview').getBoundingClientRect();
+            const overlay = d.getElementById('overlay').getBoundingClientRect();
+            assert(overlay.top >= preview.top - 1, `overlay top ${overlay.top} inside preview top ${preview.top}`);
+            const hit = d.elementFromPoint(10, 10);
+            assert(hit && hit.id !== 'overlay', 'top-left of the page is not covered by the overlay');
+        } finally {
+            frame.remove();
+        }
+    });
+
+    h.run();
+</script>
+</body>
+</html>

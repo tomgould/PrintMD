@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF Importer Hostile-Input Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>PDF importer on hostile text: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+
+<!-- The app's startup scripts, in index.html's order: their polyfills change built-ins
+     (core-js in pptxgen replaces String.prototype.trim), so the checks below run on the
+     same built-ins as the app. -->
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script src="../vendor/jszip/jszip.min.js"></script>
+<script src="../js/builtins-save.js"></script>
+<script src="../vendor/pptxgenjs/pptxgen.bundle.js"></script>
+<script src="../js/builtins-restore.js"></script>
+<script type="module">
+    // Namespace imports: a missing export fails one test, not the whole page.
+    import * as pdfImport from '../js/pdf-import.js';
+    import * as growth from './lib/growth.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTERS_FUZZ');
+
+    // ── Hostile text, with the app's built-ins ───────────────────────────────
+    const MB = 1 << 20;
+    const HOSTILE = {
+        'spaces then x': ' '.repeat(MB) + 'x',
+        'tabs then x': 'a' + '\t'.repeat(MB) + 'x',
+        'NBSP then x': 'a' + String.fromCharCode(0xa0).repeat(MB) + 'x',
+        'zero-width then x': 'a' + String.fromCharCode(0x200b).repeat(MB) + 'x',
+        'ZWNJ then x': 'a' + String.fromCharCode(0x200c).repeat(MB) + 'x',
+        'spaced dots': ' .'.repeat(MB / 2) + 'x',
+        'digits then x': '1'.repeat(MB) + 'x',
+        'impl repeated': 'impl '.repeat(MB / 5),
+        'fn a then spaces': 'fn a' + ' '.repeat(MB) + 'x',
+        'SELECT repeated': 'SELECT '.repeat(MB / 7),
+        'end repeated': 'end '.repeat(MB / 4),
+        'php arrow bait': '$a' + ' '.repeat(MB),
+        'json key bait': '"a"' + ' '.repeat(MB),
+        'colon then spaces': ':' + ' '.repeat(MB) + 'x',
+        'spaced capitals': 'A '.repeat(MB / 2) + 'aa',
+        'spaced letters': 'a '.repeat(MB / 2) + 'b',
+        'spaced capital lines': ('A B C D E F\n').repeat(MB / 12) + 'a',
+        'capital lines': ('A'.repeat(50) + '\n').repeat(MB / 51) + 'a',
+        'blank lines': 'a' + '\n'.repeat(MB) + 'b',
+        'one long word': 'a'.repeat(MB),
+        'entities': '&lt'.repeat(MB / 3) + ';',
+        'dashes': '- '.repeat(MB / 2) + 'x',
+        'urls': 'xhttp://'.repeat(MB / 8),
+        'page bait': 'page 1' + ' '.repeat(MB) + 'x',
+        'hash heading bait': '## ' + ' '.repeat(MB) + 'x',
+    };
+    // Growth, not wall-clock: four runs on N characters of every pattern (a prefix,
+    // plus the pattern's last character) against one run on 4N; linear work takes
+    // about as long either way, quadratic about 4x (tests/lib/growth.js). A slower
+    // CPU slows both alike. The cap is far above any linear time.
+    // 16K and 64K: the old quadratic patterns cost 0.5 s to over 1 s at 64K in Chrome, far over the
+    // noise floor, while the page stays light enough for a CI box at a quarter of a CPU.
+    const SIZE = 16 * 1024;
+    const CAP_MS = 2000;
+    const sized = (pattern) => (n) => pattern.slice(0, n) + pattern.slice(-1);
+    const hostileLine = (text) => ({text, pageNum: 1, pageY: 790, pageHeight: 800, isMono: false, fontSize: 12, x: 72});
+    const RUNNERS = {
+        postProcess: (s) => pdfImport.postProcess(s),
+        guessLang: (s) => pdfImport.guessLang(s),
+        codeScore: (s) => pdfImport.codeScore(s),
+        classifyLine: (s) => pdfImport.classifyLine(hostileLine(s), 12, 72),
+        stripPageNumber: (s) => pdfImport.stripPageNumber(s),
+        repairSpacing: (s) => pdfImport.repairSpacing(s),
+        autolinkUrls: (s) => pdfImport.autolinkUrls(s),
+        splitOuterSpace: (s) => pdfImport.splitOuterSpace(s),
+    };
+    for (const [fname, run] of Object.entries(RUNNERS)) {
+        h.test(`hostile inputs: ${fname} grows linearly on every pattern`, async () => {
+            assert(typeof pdfImport[fname] === 'function', `${fname} is not exported`);
+            const problems = [];
+            for (const [label, pattern] of Object.entries(HOSTILE)) {
+                const problem = await growth.checkLinear(run, sized(pattern), {n: SIZE, capMs: CAP_MS});
+                if (problem) problems.push(`${label}: ${problem}`);
+            }
+            assert(problems.length === 0, problems.join('; '));
+        });
+    }
+
+    // removeRunningElements, a hostile PDF and the app page's built-ins: importers-fuzz-app.test.html.
+
+    h.run();
+</script>
+</body>
+</html>

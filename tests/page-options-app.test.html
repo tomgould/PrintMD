@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Page Options in the App Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        #app { width: 1300px; height: 760px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>Page options in the editor: Custom size, the Page options dialog, the preview, per-document memory, the print window</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<iframe id="app" title="app under test"></iframe>
+<!--
+  The whole editor in a frame. The pure option rules are in tests/page-options.test.mjs, the
+  measuring step in tests/page-layout.test.html, the API's PDFs in server/test/page-control.test.mjs.
+-->
+<script type="module">
+    import * as store from '../js/store.js';
+    import {getTemplates} from '../js/templates.js';
+    import {normalizeRunning} from '../js/page-chrome.js';
+    import {templatePageSizes} from '../js/export-options.js';
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+
+    const h = createHarness('PAGEOPTSAPP', {timeoutMs: 20000});
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const frame = document.getElementById('app');
+    const LAST_USED = 'printmd-export-opts';
+    // Chosen by what they offer, never by name: a template with paper sizes, and one with a running head and foot.
+    const all = getTemplates();
+    const PAPER = all.find((t) => templatePageSizes(t.manifest).includes('A4') && !templatePageSizes(t.manifest).includes('Slide'));
+    const RUNNING = all.find((t) => normalizeRunning(t.template) && templatePageSizes(t.manifest).includes('A4'));
+    let win, doc;
+
+    async function waitFor(fn, what, ms = 8000) {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+            try { if (fn()) return; } catch (_e) { /* not ready */ }
+            await sleep(30);
+        }
+        throw new Error('timed out waiting for ' + what);
+    }
+    async function boot(reload = false) {
+        const loaded = new Promise(res => frame.addEventListener('load', res, {once: true}));
+        if (reload) frame.contentWindow.location.reload(); else frame.src = '../index.html';
+        await loaded;
+        win = frame.contentWindow;
+        doc = frame.contentDocument;
+        await waitFor(() => win.__bd && win.__bd.docManager.currentId != null && !$('editor').readOnly, 'app boot');
+    }
+    const $ = (id) => doc.getElementById(id);
+    const mgr = () => win.__bd.docManager;
+    const modal = () => $('page-options-modal');
+    const settle = () => mgr().saveCurrent();
+    function pick(id, value) {
+        $(id).value = value;
+        $(id).dispatchEvent(new win.Event('change', {bubbles: true}));
+    }
+    function type(id, value) {
+        $(id).value = value;
+        $(id).dispatchEvent(new win.Event('input', {bubbles: true}));
+    }
+    function setText(text) {
+        $('editor').value = text;
+        $('editor').dispatchEvent(new win.Event('input', {bubbles: true}));
+    }
+    const choose = (selector) => { const el = doc.querySelector(selector); el.checked = true; el.dispatchEvent(new win.Event('change', {bubbles: true})); };
+    const key = (k) => doc.activeElement.dispatchEvent(new win.KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true}));
+    const stored = async () => (await store.getDoc(mgr().currentId)).exportOpts || {};
+    const button = (choice) => modal().querySelector(`[data-choice="${choice}"]`);
+
+    /** Fill the dialog: a custom size, layout, fit and margin ('' leaves the template's). */
+    function fill({custom, width, height, unit, layout, fit, margin, marginUnit}) {
+        if (custom !== undefined) { $('po-custom').checked = custom; $('po-custom').dispatchEvent(new win.Event('change', {bubbles: true})); }
+        if (width !== undefined) type('po-width', width);
+        if (height !== undefined) type('po-height', height);
+        if (unit !== undefined) pick('po-unit', unit);
+        if (layout) choose(`input[name="po-layout"][value="${layout}"]`);
+        if (fit) pick('po-fit', fit);
+        if (margin !== undefined) type('po-margin', margin);
+        if (marginUnit) pick('po-margin-unit', marginUnit);
+    }
+
+    h.test('the dialog: a labelled modal dialog, focus inside, Escape closes it and changes nothing', async () => {
+        await resetStorage(store);
+        try { localStorage.removeItem(LAST_USED); } catch (_e) { /* unavailable */ }
+        await boot();
+        setText('# Page options\n\nSome text.');
+        pick('template-select', PAPER.manifest.id);
+        await settle();
+        const opener = $('btn-page-options');
+        assert(opener && opener.getAttribute('aria-haspopup') === 'dialog', 'a toolbar button that opens a dialog');
+        opener.focus();
+        opener.click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        assert(modal().getAttribute('role') === 'dialog' && modal().getAttribute('aria-modal') === 'true', 'a modal dialog');
+        assert($(modal().getAttribute('aria-labelledby')).textContent === 'Page options', 'named');
+        for (const id of ['po-custom', 'po-width', 'po-height', 'po-unit', 'po-fit', 'po-margin', 'po-margin-unit']) {
+            const el = $(id);
+            assert(el && (el.labels?.length || el.getAttribute('aria-label')), 'labelled: ' + id);
+        }
+        assert(modal().contains(doc.activeElement), 'focus inside: ' + doc.activeElement?.id);
+        assert($('main').inert, 'the rest of the app is inert');
+        key('Escape');
+        await waitFor(() => modal().hidden, 'closed by Escape');
+        assert(doc.activeElement === opener, 'focus back on the button');
+        assert(Object.keys(await stored()).every((k) => !['layout', 'fit', 'margin', 'customSize'].includes(k)), 'nothing saved');
+    });
+
+    h.test('Custom size in the Size select opens the dialog; Cancel puts the size back', async () => {
+        const before = $('export-paper-size').value;
+        pick('export-paper-size', 'Custom');
+        await waitFor(() => !modal().hidden, 'the dialog');
+        assert($('po-custom').checked, 'custom size ticked');
+        assert(doc.activeElement === $('po-width'), 'focus on the width');
+        button('cancel').click();
+        await waitFor(() => modal().hidden, 'closed');
+        assert($('export-paper-size').value === before, 'the size is back: ' + $('export-paper-size').value);
+    });
+
+    h.test('values outside the limits or not numbers are refused in the dialog, and nothing is saved', async () => {
+        $('btn-page-options').click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        for (const bad of [{custom: true, width: '10', height: '150', unit: 'mm'}, {custom: true, width: '100;}', height: '150', unit: 'mm'},
+            {custom: true, width: 'calc(1px)', height: '150', unit: 'mm'}, {custom: true, width: '300', height: '300', unit: 'in'},
+            {custom: false, margin: '101', marginUnit: 'mm'}, {custom: false, margin: '1e2', marginUnit: 'mm'},
+            {custom: false, margin: 'url(x)', marginUnit: 'mm'}, {custom: true, width: '50', height: '50', unit: 'mm', margin: '20', marginUnit: 'mm'}]) {
+            fill({margin: '', ...bad});
+            button('save').click();
+            await sleep(30);
+            assert(!modal().hidden, 'still open for ' + JSON.stringify(bad));
+            assert($('po-error').textContent.trim().length > 0, 'an error is shown for ' + JSON.stringify(bad));
+            assert(modal().contains(doc.activeElement), 'focus stays in the dialog');
+            const invalid = Array.from(modal().querySelectorAll('[aria-invalid="true"]'));
+            assert(invalid.length <= 1 && invalid.every((el) => el.getAttribute('aria-errormessage') === 'po-error'),
+                'the field is tied to the message: ' + invalid.map((el) => el.id + ' ' + el.getAttribute('aria-errormessage')));
+            if (invalid.length) assert(doc.activeElement === invalid[0], 'focus on the field named');
+        }
+        button('cancel').click();
+        await waitFor(() => modal().hidden, 'closed');
+        assert(!('customSize' in await stored()) && !('margin' in await stored()), 'nothing saved: ' + JSON.stringify(await stored()));
+    });
+
+    h.test('Save: a custom size, one continuous page, widest and a margin of 0 are stored with the document; the controls and preview follow', async () => {
+        $('btn-page-options').click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        fill({custom: true, width: '100', height: '150', unit: 'mm', layout: 'continuous', fit: 'widest', margin: '0', marginUnit: 'mm'});
+        button('save').click();
+        await waitFor(() => modal().hidden, 'closed');
+        await settle();
+        const s = await stored();
+        assert(s.pageSize === 'Custom' && s.customSize === '100x150mm' && s.layout === 'continuous' && s.fit === 'widest' && s.margin === '0mm',
+            'stored: ' + JSON.stringify(s));
+        assert($('export-paper-size').value === 'Custom', 'Size shows Custom');
+        assert($('export-orientation').disabled, 'the orientation does not turn a custom size');
+        const pane = $('preview-pane');
+        assert(pane.style.getPropertyValue('--preview-page-width') === `${Math.round(100 * 96 / 25.4)}px`, 'the page card width');
+        assert(pane.style.getPropertyValue('--preview-page-aspect') === '1.5', 'the page card shape');
+        assert(pane.classList.contains('continuous'), 'one tall card');
+        assert($('btn-page-options').classList.contains('active'), 'the button shows options are set');
+        assert(/continuous/i.test($('btn-page-options').title), 'and says which: ' + $('btn-page-options').title);
+    });
+
+    h.test('per document: another document keeps the defaults; both survive a reload', async () => {
+        const a = mgr().currentId;
+        const before = mgr().currentId;
+        $('btn-new').click();
+        await waitFor(() => mgr().currentId !== before && $('editor').value === '', 'a new document');
+        setText('# Second\n\ntext');
+        await settle();
+        const b = mgr().currentId;
+        const sb = await stored();
+        assert(!sb.layout && !sb.fit && !sb.margin, 'a new document starts paged, fit off, the template margin: ' + JSON.stringify(sb));
+        assert(!$('preview-pane').classList.contains('continuous'), 'paged preview');
+        await boot(true);
+        await win.__bd.openDocument(a);
+        assert($('export-paper-size').value === 'Custom' && $('preview-pane').classList.contains('continuous'), 'A after reload');
+        $('btn-page-options').click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        assert($('po-custom').checked && $('po-width').value === '100' && $('po-height').value === '150' && $('po-unit').value === 'mm', 'size kept');
+        assert(doc.querySelector('input[name="po-layout"][value="continuous"]').checked, 'layout kept');
+        assert($('po-fit').value === 'widest' && $('po-margin').value === '0' && $('po-margin-unit').value === 'mm', 'fit and margin kept');
+        button('cancel').click();
+        await waitFor(() => modal().hidden, 'closed');
+        await win.__bd.openDocument(b);
+        assert(!$('preview-pane').classList.contains('continuous'), 'B stays paged');
+        // Back to a named size: the custom size is remembered for next time.
+        await win.__bd.openDocument(a);
+        pick('export-paper-size', 'A4');
+        await settle();
+        const s = await stored();
+        assert(s.pageSize === 'A4' && s.customSize === '100x150mm', 'remembered: ' + JSON.stringify(s));
+        assert(!$('export-orientation').disabled, 'the orientation is back for A4');
+    });
+
+    h.test('Reset puts the document back to pages, fit off and the template margin', async () => {
+        $('btn-page-options').click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        button('reset').click();
+        assert(doc.querySelector('input[name="po-layout"][value="paged"]').checked && $('po-fit').value === 'off' && $('po-margin').value === '',
+            'the form reset');
+        button('save').click();
+        await waitFor(() => modal().hidden, 'closed');
+        await settle();
+        const s = await stored();
+        assert(s.layout === 'paged' && s.fit === 'off' && !('margin' in s), 'stored: ' + JSON.stringify(s));
+    });
+
+    h.test('front matter: the dialog shows what the front matter sets and says so', async () => {
+        const before = mgr().currentId;
+        $('btn-new').click();
+        await waitFor(() => mgr().currentId !== before && $('editor').value === '', 'a new document');
+        setText('---\nlayout: continuous\nmargin: 12mm\n---\n# Front matter\n\ntext');
+        await settle();
+        $('btn-page-options').click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        assert(doc.querySelector('input[name="po-layout"][value="continuous"]').checked, 'continuous from the front matter');
+        assert($('po-margin').value === '12' && $('po-margin-unit').value === 'mm', 'margin from the front matter');
+        assert(/front matter/i.test($('po-note').textContent), 'the note: ' + $('po-note').textContent);
+        button('cancel').click();
+        await waitFor(() => modal().hidden, 'closed');
+    });
+
+    h.test('a custom size wider than tall shows Landscape (locked), and the continuous preview does not cut the cover', async () => {
+        const before = mgr().currentId;
+        $('btn-new').click();
+        await waitFor(() => mgr().currentId !== before && $('editor').value === '', 'a new document');
+        setText('---\ntitle: A wide page\n---\n# A wide page\n\ntext');
+        pick('template-select', PAPER.manifest.id);
+        await settle();
+        $('btn-page-options').click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        fill({custom: true, width: '300', height: '100', unit: 'mm', layout: 'continuous', fit: 'off', margin: ''});
+        button('save').click();
+        await waitFor(() => modal().hidden, 'closed');
+        await settle();
+        assert($('export-orientation').disabled && $('export-orientation').value === 'landscape', 'Landscape, locked');
+        await waitFor(() => doc.querySelector('#preview .preview-page-cover .cover-page'), 'the cover in the preview');
+        const cover = doc.querySelector('#preview .preview-page-cover .cover-page');
+        const card = doc.querySelector('#preview .preview-page-cover');
+        assert(cover.getBoundingClientRect().height <= card.getBoundingClientRect().height + 1
+            && card.scrollHeight <= card.clientHeight + 1, `the cover is whole: ${cover.scrollHeight} in ${card.clientHeight}`);
+        // Back to pages: the cover card is one page tall again, as before.
+        $('btn-page-options').click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        fill({custom: false, layout: 'paged'});
+        button('save').click();
+        await waitFor(() => modal().hidden, 'closed');
+        await settle();
+        assert(!$('preview-pane').classList.contains('continuous'), 'paged');
+    });
+
+    h.test('front matter: saving only a size stores only the size, so later front matter edits still apply', async () => {
+        const before = mgr().currentId;
+        $('btn-new').click();
+        await waitFor(() => mgr().currentId !== before && $('editor').value === '', 'a new document');
+        setText('---\nlayout: continuous\nfit: width\n---\n# Follows\n\ntext');
+        await settle();
+        $('btn-page-options').click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        fill({custom: true, width: '120', height: '160', unit: 'mm'});
+        button('save').click();
+        await waitFor(() => modal().hidden, 'closed');
+        await settle();
+        const s = await stored();
+        assert(s.customSize === '120x160mm' && s.pageSize === 'Custom', 'the size stored: ' + JSON.stringify(s));
+        assert(!('layout' in s) && !('fit' in s) && !('margin' in s), 'nothing copied from the front matter: ' + JSON.stringify(s));
+        // The front matter changes: the editor follows it.
+        setText('---\nlayout: paged\n---\n# Follows\n\ntext');
+        await settle();
+        $('btn-page-options').click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        assert(doc.querySelector('input[name="po-layout"][value="paged"]').checked, 'paged now, from the front matter');
+        assert($('po-fit').value === 'off', 'fit off now');
+        button('cancel').click();
+        await waitFor(() => modal().hidden, 'closed');
+        // A choice that differs from the front matter is the document's own.
+        setText('---\nlayout: continuous\n---\n# Follows\n\ntext');
+        await settle();
+        $('btn-page-options').click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        fill({layout: 'paged'});
+        button('save').click();
+        await waitFor(() => modal().hidden, 'closed');
+        await settle();
+        assert((await stored()).layout === 'paged', 'stored when it differs: ' + JSON.stringify(await stored()));
+    });
+
+    h.test('a margin under the running head\'s 18 mm is named in the preflight list before the print window opens', async () => {
+        if (!RUNNING) return;
+        const before = mgr().currentId;
+        $('btn-new').click();
+        await waitFor(() => mgr().currentId !== before && $('editor').value === '', 'a new document');
+        setText('# Margin\n\ntext');
+        pick('template-select', RUNNING.manifest.id);
+        pick('export-paper-size', 'A4');
+        $('btn-page-options').click();
+        await waitFor(() => !modal().hidden, 'the dialog');
+        fill({custom: false, layout: 'paged', fit: 'off', margin: '12', marginUnit: 'mm'});
+        button('save').click();
+        await waitFor(() => modal().hidden, 'closed');
+        await settle();
+        let opened = 0;
+        win.open = () => { opened++; return null; };
+        pick('export-format', 'pdf');
+        $('btn-export').click();
+        await waitFor(() => !$('preflight-modal').hidden, 'the preflight list');
+        assert(/running head and foot are left out/.test($('preflight-modal-list').textContent), $('preflight-modal-list').textContent);
+        assert(opened === 0, 'asked before the print window');
+        const cancel = Array.from($('preflight-modal').querySelectorAll('button')).find((b) => /cancel/i.test(b.textContent));
+        cancel.click();
+        await waitFor(() => $('preflight-modal').hidden, 'closed');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

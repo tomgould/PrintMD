@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF Export In-App Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>pdf-export.js in the app: the preflight dialog comes before the pop-up</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<iframe id="app" title="app under test" style="width:1200px;height:800px;border:0;position:absolute;left:-9999px"></iframe>
+<script type="module">
+    // Split from pdf-export.test.html: booting the whole app in a frame is the heavy
+    // part, and on its own page neither page nears the runner's 30 s limit on a slow CPU.
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+
+    const h = createHarness('PDFEXPORT_APP');
+
+    /** A stand-in for the window.open() popup (as in pdf-export.test.html). */
+    function makeFakeWindow({completeOnClose = false, autoLoad = false} = {}) {
+        const listeners = {};
+        const win = {
+            written: '', printed: 0, closedCalls: 0, closed: false,
+            document: {
+                readyState: 'loading',
+                fonts: {ready: Promise.resolve()},
+                open() {},
+                write(s) { win.written += s; },
+                close() {
+                    if (completeOnClose) this.readyState = 'complete';
+                    if (autoLoad) setTimeout(() => win.dispatch('load'), 10);
+                },
+            },
+            addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+            removeEventListener(type, fn) { listeners[type] = (listeners[type] || []).filter(f => f !== fn); },
+            dispatch(type) {
+                if (type === 'load') win.document.readyState = 'complete';
+                for (const fn of listeners[type] || []) fn({type});
+            },
+            focus() {},
+            print() { win.printed++; },
+            close() { win.closedCalls++; win.closed = true; },
+        };
+        return win;
+    }
+
+    // ── In the app: the dialog comes before the pop-up ──────────────────────
+    const sleep2 = (ms) => new Promise(r => setTimeout(r, ms));
+    let app = null;
+
+    async function bootApp() {
+        if (app) return app;
+        await resetStorage();
+        const frame = document.getElementById('app');
+        frame.src = '../index.html';
+        await new Promise(res => frame.addEventListener('load', res, {once: true}));
+        const win = frame.contentWindow;
+        const end = Date.now() + 6000;
+        while (!(win.__bd && win.__bd.docManager.currentId != null) && Date.now() < end) await sleep2(50);
+        app = {win, doc: frame.contentDocument, opened: 0};
+        win.open = () => { app.opened++; return null; };   // a blocked pop-up: the export stops with a toast
+        return app;
+    }
+
+    async function exportWithoutTitle(a) {
+        const editor = a.doc.querySelector('#editor-pane #editor');
+        editor.value = 'No heading, so the template warns.';
+        editor.dispatchEvent(new a.win.Event('input', {bubbles: true}));
+        const fmt = a.doc.querySelector('#toolbar-nav #export-format');
+        fmt.value = 'pdf';
+        fmt.dispatchEvent(new a.win.Event('change', {bubbles: true}));
+        a.doc.querySelector('#toolbar-nav #btn-export').click();
+        await sleep2(50);
+        return a.doc.querySelector('body > #preflight-modal');
+    }
+
+    h.test('app: Export shows the preflight dialog before opening any window; Cancel opens none', async () => {
+        const a = await bootApp();
+        a.opened = 0;
+        const dlg = await exportWithoutTitle(a);
+        assert(dlg && !dlg.hidden, 'preflight dialog shown');
+        assert(/title/i.test(dlg.textContent), 'warning text shown: ' + dlg.textContent);
+        assert(a.opened === 0, 'no window before the choice');
+        dlg.querySelector('button[data-choice="cancel"]').click();
+        await sleep2(50);
+        assert(dlg.hidden && a.opened === 0, 'cancelled: no window');
+    });
+
+    h.test('app: Export anyway opens the window; a blocked pop-up shows a toast', async () => {
+        const a = await bootApp();
+        a.opened = 0;
+        const dlg = await exportWithoutTitle(a);
+        dlg.querySelector('button[data-choice="proceed"]').click();
+        await sleep2(100);
+        assert(a.opened === 1, 'window.open called once after Export anyway, got ' + a.opened);
+        const toast = a.doc.querySelector('body > #toast');
+        assert(toast && /pop-ups/i.test(toast.textContent), 'toast explains: ' + (toast && toast.textContent));
+    });
+
+    h.test('app: a double click on Export opens one print window; the next export opens another', async () => {
+        const a = await bootApp();
+        const realOpen = a.win.open;
+        const windows = [];
+        a.win.open = () => { const w = makeFakeWindow({autoLoad: true}); windows.push(w); return w; };
+        try {
+            const editor = a.doc.querySelector('#editor-pane #editor');
+            editor.value = '# Titled\n\nNo warnings here.';
+            editor.dispatchEvent(new a.win.Event('input', {bubbles: true}));
+            const fmt = a.doc.querySelector('#toolbar-nav #export-format');
+            fmt.value = 'pdf';
+            fmt.dispatchEvent(new a.win.Event('change', {bubbles: true}));
+            const btn = a.doc.querySelector('#toolbar-nav #btn-export');
+            btn.click();
+            btn.click();
+            const end = Date.now() + 4000;
+            while (!(windows[0] && windows[0].printed) && Date.now() < end) await sleep2(25);
+            assert(windows.length === 1, 'one window for a double click, got ' + windows.length);
+            assert(windows[0].printed === 1, 'it printed');
+            btn.click();
+            const end2 = Date.now() + 4000;
+            while (!(windows[1] && windows[1].printed) && Date.now() < end2) await sleep2(25);
+            assert(windows.length === 2 && windows[1].printed === 1, 'a later export opens a new window, got ' + windows.length);
+        } finally {
+            a.win.open = realOpen;
+        }
+    });
+
+    h.test('app: Word export with images lists them first, and the toast after says how many were left out', async () => {
+        const a = await bootApp();
+        const toastText = () => (a.doc.querySelector('body > #toast') || {}).textContent || '';
+        let downloads = 0;
+        const realClick = a.win.HTMLAnchorElement.prototype.click;
+        a.win.HTMLAnchorElement.prototype.click = () => { downloads++; };   // no real download from the test
+        try {
+            const editor = a.doc.querySelector('#editor-pane #editor');
+            // A data: URI and a web address (a closed local port: nothing leaves the machine).
+            editor.value = '# Pictures\n\n![a](data:image/png;base64,iVBORw0KGgo=)\n\n![b](http://127.0.0.1:9/b.png)\n';
+            editor.dispatchEvent(new a.win.Event('input', {bubbles: true}));
+            const fmt = a.doc.querySelector('#toolbar-nav #export-format');
+            fmt.value = 'docx';
+            fmt.dispatchEvent(new a.win.Event('change', {bubbles: true}));
+            const btn = a.doc.querySelector('#toolbar-nav #btn-export');
+            const dlg = a.doc.querySelector('body > #preflight-modal');
+            const waitOpen = async () => {
+                const end = Date.now() + 4000;
+                while (dlg.hidden && Date.now() < end) await sleep2(25);
+                assert(!dlg.hidden, 'preflight dialog shown before the Word export');
+            };
+            btn.click();
+            await waitOpen();
+            const items = [...dlg.querySelectorAll('[data-role="list"] li')].map((li) => li.textContent);
+            assert(items.join('|') === '2 images will be left out of the Word file; the PDF keeps them.', 'listed: ' + items.join('|'));
+            assert(/Word file can still be exported/.test(dlg.querySelector('[data-role="message"]').textContent),
+                'the message names the Word file: ' + dlg.querySelector('[data-role="message"]').textContent);
+            dlg.querySelector('button[data-choice="cancel"]').click();
+            await sleep2(300);
+            assert(downloads === 0, 'cancelled: no download');
+            btn.click();
+            await waitOpen();
+            dlg.querySelector('button[data-choice="proceed"]').click();
+            const end = Date.now() + 8000;
+            while (!/^Word document exported/.test(toastText()) && Date.now() < end) await sleep2(25);
+            assert(toastText() === 'Word document exported. 2 images were left out of the Word file; the PDF keeps them.',
+                'toast: ' + toastText());
+            assert(downloads === 1, 'one download, got ' + downloads);
+        } finally {
+            a.win.HTMLAnchorElement.prototype.click = realClick;
+        }
+    });
+
+    h.test('cleanup', async () => {
+        document.getElementById('app').src = 'about:blank';
+        await sleep2(100);
+        await resetStorage();
+    });
+
+    h.run();
+</script>
+</body>
+</html>

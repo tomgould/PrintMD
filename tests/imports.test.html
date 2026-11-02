@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Import Dispatcher Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>imports.js tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as imp from '../js/imports.js';
+    import * as dm from '../js/docmanager.js';
+    import * as store from '../js/store.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTS');
+
+    function makeIO() {
+        const io = {
+            val: '', tid: 'example-co',
+            getValue: () => io.val,
+            setValue: (t) => { io.val = t; },
+            getTemplateId: () => io.tid,
+            setTemplateId: (id) => { io.tid = id; },
+        };
+        return io;
+    }
+
+    async function setup() {
+        const io = makeIO();
+        const mem = store.createMemoryStore();
+        const mgr = dm.createDocManager(io, mem);
+        await mgr.init('# Existing');
+        return {io, mem, mgr, existingId: mgr.currentId};
+    }
+
+    /** A fake importer table: each converter records what it was called with. */
+    function fakeImporters(calls, {failId = null} = {}) {
+        const make = (id, exts) => ({
+            id, label: id.toUpperCase(), extensions: exts,
+            load: async () => async (file, onProgress) => {
+                calls.push({id, name: file.name});
+                if (onProgress) onProgress(50);
+                if (id === failId) throw new Error(id + ' is broken');
+                return `# From ${id}: ${file.name}`;
+            },
+        });
+        return [make('pdf', ['.pdf']), make('docx', ['.docx', '.doc']), make('html', ['.html', '.htm']), make('epub', ['.epub'])];
+    }
+
+    function recorder() {
+        const r = {events: [], ui: null};
+        r.ui = (importer) => {
+            r.events.push(['importer', importer ? importer.id : null]);
+            return {
+                onStart: () => r.events.push(['start']),
+                onProgress: (pct) => r.events.push(['progress', pct]),
+                onDone: (doc) => r.events.push(['done', doc.id]),
+                onCancel: () => r.events.push(['cancel']),
+                onError: (err) => r.events.push(['error', err.message]),
+            };
+        };
+        return r;
+    }
+
+    h.test('the real table covers PDF, Word, HTML and EPUB with lazy loaders', async () => {
+        const ids = imp.IMPORTERS.map((x) => x.id).sort();
+        assert(JSON.stringify(ids) === JSON.stringify(['docx', 'epub', 'html', 'pdf']), `ids ${JSON.stringify(ids)}`);
+        for (const x of imp.IMPORTERS) assert(typeof x.load === 'function' && x.extensions.length > 0, `${x.id} incomplete`);
+        const pdf = await imp.IMPORTERS.find((x) => x.id === 'pdf').load();
+        assert(typeof pdf === 'function', 'pdf loader did not return a converter');
+    });
+
+    h.test('routing by extension, case-insensitive; fallback only when the extension is unknown', () => {
+        assert(imp.findImporter('Report.PDF').id === 'pdf', 'PDF');
+        assert(imp.findImporter('a.docx').id === 'docx' && imp.findImporter('old.doc').id === 'docx', 'Word');
+        assert(imp.findImporter('page.htm').id === 'html', 'HTML');
+        assert(imp.findImporter('book.epub').id === 'epub', 'EPUB');
+        assert(imp.findImporter('book.epub', 'pdf').id === 'epub', 'extension must beat the fallback');
+        assert(imp.findImporter('noextension', 'docx').id === 'docx', 'fallback for an unknown extension');
+        assert(imp.findImporter('photo.png') === null, 'unknown type should match nothing');
+    });
+
+    h.test('importFile converts with the matching importer and opens a NEW doc named after the file', async () => {
+        const {io, mem, mgr, existingId} = await setup();
+        const calls = [];
+        const rec = recorder();
+        const doc = await imp.importFile(mgr, new File(['x'], 'Quarterly report.docx'), {ui: rec.ui, importers: fakeImporters(calls)});
+        assert(calls.length === 1 && calls[0].id === 'docx', `calls ${JSON.stringify(calls)}`);
+        assert(doc && doc.id !== existingId, 'did not create a new doc');
+        assert(mgr.currentId === doc.id, 'the new doc is not the open one');
+        assert(io.val === '# From docx: Quarterly report.docx', `editor shows ${JSON.stringify(io.val)}`);
+        assert(mgr.currentFileName === 'Quarterly report.md', `fileName ${mgr.currentFileName}`);
+        assert((await mem.getDoc(existingId)).snapshot === '# Existing', 'the existing doc was replaced');
+        assert((await mem.getDoc(doc.id)).fileName === 'Quarterly report.md', 'fileName not stored');
+        const kinds = rec.events.map((x) => x[0]);
+        assert(JSON.stringify(kinds) === JSON.stringify(['importer', 'start', 'progress', 'done']), `events ${JSON.stringify(rec.events)}`);
+    });
+
+    h.test('a converter error reaches onError, creates no doc and leaves the open doc alone', async () => {
+        const {io, mem, mgr, existingId} = await setup();
+        const rec = recorder();
+        const doc = await imp.importFile(mgr, new File(['x'], 'bad.pdf'), {ui: rec.ui, importers: fakeImporters([], {failId: 'pdf'})});
+        assert(doc === null, 'should resolve null, not throw');
+        assert(rec.events.some((x) => x[0] === 'error' && x[1] === 'pdf is broken'), `events ${JSON.stringify(rec.events)}`);
+        assert(!rec.events.some((x) => x[0] === 'done'), 'onDone called after an error');
+        assert(mgr.currentId === existingId && io.val === '# Existing', 'the open doc changed');
+        assert((await mem.listRecent()).length === 1, 'a doc was created');
+    });
+
+    h.test('a loader that fails (module did not load) is reported the same way', async () => {
+        const {mgr, existingId} = await setup();
+        const rec = recorder();
+        const broken = [{id: 'pdf', label: 'PDF', extensions: ['.pdf'], load: () => Promise.reject(new Error('module failed'))}];
+        const doc = await imp.importFile(mgr, new File(['x'], 'a.pdf'), {ui: rec.ui, importers: broken});
+        assert(doc === null && mgr.currentId === existingId, 'doc created or switched');
+        assert(rec.events.some((x) => x[0] === 'error' && x[1] === 'module failed'), `events ${JSON.stringify(rec.events)}`);
+    });
+
+    h.test('an unsupported file is reported and opens nothing', async () => {
+        const {mgr, existingId} = await setup();
+        const rec = recorder();
+        const doc = await imp.importFile(mgr, new File(['x'], 'photo.png'), {ui: rec.ui, importers: fakeImporters([])});
+        assert(doc === null && mgr.currentId === existingId, 'something opened');
+        assert(rec.events.some((x) => x[0] === 'error' && /Unsupported/.test(x[1])), `events ${JSON.stringify(rec.events)}`);
+    });
+
+    h.test('runImport: a converter returning null (picker cancelled) calls onCancel and opens nothing', async () => {
+        const {mgr, existingId} = await setup();
+        const events = [];
+        const doc = await imp.runImport(mgr, {
+            convert: async () => null, input: null,
+            ui: {onDone: () => events.push('done'), onCancel: () => events.push('cancel'), onError: () => events.push('error')},
+        });
+        assert(doc === null && mgr.currentId === existingId, 'something opened');
+        assert(JSON.stringify(events) === JSON.stringify(['cancel']), `events ${JSON.stringify(events)}`);
+    });
+
+    h.test('an import always opens a new doc, even when the user switches docs during conversion', async () => {
+        const {io, mem, mgr, existingId} = await setup();
+        await mgr.newDoc('# Second');
+        const second = mgr.currentId;
+        let finish;
+        const slow = [{id: 'pdf', label: 'PDF', extensions: ['.pdf'],
+            load: async () => () => new Promise((resolve) => { finish = () => resolve('# Converted'); })}];
+        const running = imp.importFile(mgr, new File(['x'], 'slow.pdf'), {importers: slow});
+        while (!finish) await new Promise((r) => setTimeout(r, 0));
+        await mgr.switchTo(existingId);
+        finish();
+        const doc = await running;
+        assert(doc && doc.id !== existingId && doc.id !== second, 'import reused an existing doc');
+        assert((await mem.getDoc(existingId)).snapshot === '# Existing', 'first doc replaced');
+        assert((await mem.getDoc(second)).snapshot === '# Second', 'second doc replaced');
+        assert(io.val === '# Converted' && mgr.currentId === doc.id, 'the imported doc is not the open one');
+    });
+
+    h.test('converter warnings reach onDone; password and confirm callbacks reach the converter', async () => {
+        const {mgr} = await setup();
+        const seen = {};
+        const doc = await imp.runImport(mgr, {
+            input: 'x',
+            convert: async (_input, _onProgress, opts) => {
+                opts.onWarning('first note');
+                opts.onWarning('second note');
+                seen.password = await opts.onPassword('need');
+                seen.confirm = await opts.onConfirm('big?');
+                return '# Converted';
+            },
+            ui: {
+                onPassword: async (reason) => `pw-for-${reason}`,
+                onConfirm: async (message) => message === 'big?',
+                onDone: (d, warnings) => { seen.done = {id: d.id, warnings}; },
+            },
+        });
+        assert(doc && seen.done && seen.done.id === doc.id, 'onDone not called with the doc');
+        assert(JSON.stringify(seen.done.warnings) === '["first note","second note"]', 'warnings ' + JSON.stringify(seen.done.warnings));
+        assert(seen.password === 'pw-for-need' && seen.confirm === true, JSON.stringify(seen));
+    });
+
+    h.test('an import with no warnings passes an empty list to onDone', async () => {
+        const {mgr} = await setup();
+        let warnings = null;
+        await imp.importFile(mgr, new File(['x'], 'a.html'), {
+            importers: fakeImporters([]), ui: () => ({onDone: (_d, w) => { warnings = w; }}),
+        });
+        assert(Array.isArray(warnings) && warnings.length === 0, 'got ' + JSON.stringify(warnings));
+    });
+
+    h.test('importFile hands the converter its opts (third argument)', async () => {
+        const {mgr} = await setup();
+        let got = null;
+        const importers = [{id: 'pdf', label: 'PDF', extensions: ['.pdf'],
+            load: async () => async (_file, _p, opts) => { got = opts; return '# x'; }}];
+        await imp.importFile(mgr, new File(['x'], 'a.pdf'), {importers, ui: () => ({onConfirm: async () => true})});
+        assert(got && typeof got.onWarning === 'function' && typeof got.onConfirm === 'function', 'opts ' + JSON.stringify(Object.keys(got || {})));
+    });
+
+    h.test('markdownFileName swaps the extension for .md', () => {
+        assert(imp.markdownFileName('a.pdf') === 'a.md', 'a.pdf');
+        assert(imp.markdownFileName('my.book.epub') === 'my.book.md', 'dotted name');
+        assert(imp.markdownFileName('') === null, 'empty name');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

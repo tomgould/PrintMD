@@ -1,0 +1,7 @@
+{
+  "description": "PrintMD's templates (see js/template-registry.js). The first one is the default.",
+  "templates": [
+    {"id": "unbranded", "path": "templates/unbranded/template.js"},
+    {"id": "dealmobile", "path": "templates/dealmobile/template.js", "description": "Magazine article: heavy grotesque headlines over a Caslon text face, one red accent, running head and foot, no logo"}
+  ]
+}

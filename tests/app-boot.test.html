@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>App boot Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        #app { width: 1400px; height: 900px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>App boot: the modules app.js wires are all working</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<iframe id="app" title="app under test"></iframe>
+<script type="module">
+    // A smoke test for the split of js/app.js: index.html boots under its own CSP,
+    // and the sidebar, the command palette, the keyboard shortcuts and the
+    // formatting toolbar each answer the way a user reaches them.
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+
+    const h = createHarness('APPBOOT');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const frame = document.getElementById('app');
+    let win, doc;
+
+    async function waitFor(fn, what, ms = 8000) {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+            try { if (fn()) return; } catch (_e) { /* not ready */ }
+            await sleep(30);
+        }
+        throw new Error('timed out waiting for ' + what);
+    }
+
+    const editor = () => doc.getElementById('editor');
+    const key = (target, init) => target.dispatchEvent(new win.KeyboardEvent('keydown', {bubbles: true, cancelable: true, ...init}));
+
+    function setText(text) {
+        editor().value = text;
+        editor().dispatchEvent(new win.Event('input', {bubbles: true}));
+    }
+
+    h.test('index.html boots: a document loads and the editor becomes editable', async () => {
+        await resetStorage();
+        const errors = [];
+        frame.src = '../index.html';
+        await new Promise(res => frame.addEventListener('load', res, {once: true}));
+        win = frame.contentWindow;
+        doc = frame.contentDocument;
+        win.addEventListener('error', (e) => errors.push(e.message));
+        await waitFor(() => win.__bd && win.__bd.docManager.currentId != null && !editor().readOnly, 'app boot');
+        assert(editor().value.startsWith('# Welcome to PrintMD'), 'the welcome document is loaded');
+        await waitFor(() => doc.querySelector('#preview h1'), 'preview rendered');
+        assert(errors.length === 0, 'no script errors: ' + errors.join('; '));
+        // A short document from here on: re-rendering the long welcome document on
+        // every switch is what makes this page slow on a slow CPU.
+        setText('# Small start\n\ntext');
+    });
+
+    h.test('the page has no inline script, so the CSP needs no unsafe-inline', async () => {
+        const inline = [...doc.querySelectorAll('script')].filter(s => !s.src);
+        assert(inline.length === 0, inline.length + ' inline scripts');
+        const csp = doc.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
+        const scriptSrc = csp.split(';').map(d => d.trim()).find(d => d.startsWith('script-src '));
+        assert(scriptSrc.includes("'self'") && !/unsafe-(inline|eval)/.test(scriptSrc), 'script-src: ' + scriptSrc);
+    });
+
+    h.test('sidebar: lists the open document as current and switches documents on click', async () => {
+        await waitFor(() => doc.querySelector('#doc-list .doc-item.active'), 'sidebar rendered');
+        const active = doc.querySelector('#doc-list .doc-item.active');
+        assert(active.querySelector('.doc-open').getAttribute('aria-current') === 'true', 'aria-current on the open document');
+        const firstId = win.__bd.docManager.currentId;
+        await win.__bd.docManager.newDoc('# Example Co notes\n\ntext');
+        await win.__bd.renderSidebar();
+        assert(doc.querySelectorAll('#doc-list .doc-item').length === 2, 'two documents listed');
+        const other = [...doc.querySelectorAll('#doc-list .doc-item')].find(li => li.dataset.id === firstId);
+        other.querySelector('.doc-open').click();
+        await waitFor(() => win.__bd.docManager.currentId === firstId && editor().value.startsWith('# Small start'), 'switched back');
+        await waitFor(() => doc.querySelector('#doc-list .doc-item.active').dataset.id === firstId, 'active row follows');
+    });
+
+    h.test('palette: Ctrl+K opens it with commands, Escape closes it and restores focus', async () => {
+        editor().focus();
+        key(doc, {key: 'k', ctrlKey: true});
+        await waitFor(() => !doc.getElementById('cmdk').hidden && doc.activeElement.id === 'cmdk-input', 'palette open');
+        await waitFor(() => doc.querySelectorAll('#cmdk-list [role=option]').length > 10, 'commands listed');
+        const labels = [...doc.querySelectorAll('#cmdk-list [role=option]')].map(o => o.textContent);
+        assert(labels.some(l => l.startsWith('Open: Example Co notes')), 'recent documents in the palette: ' + labels.slice(-3).join('|'));
+        key(doc.getElementById('cmdk-input'), {key: 'Escape'});
+        await waitFor(() => doc.getElementById('cmdk').hidden, 'palette closed');
+        assert(doc.activeElement === editor(), 'focus back on the editor');
+    });
+
+    h.test('shortcuts: Ctrl+B in the editor bolds the selection; Alt+1 opens the first recent file', async () => {
+        setText('make this bold');
+        editor().focus();
+        editor().setSelectionRange(10, 14);
+        key(editor(), {key: 'b', ctrlKey: true});
+        assert(editor().value === 'make this **bold**', 'bolded: ' + editor().value);
+        const first = doc.querySelector('#doc-list .doc-item').dataset.id;
+        key(doc.body, {key: '1', altKey: true});
+        await waitFor(() => win.__bd.docManager.currentId === first, 'Alt+1 opened the first recent file');
+    });
+
+    h.test('editor format: the toolbar inserts Markdown (H2, list, code block)', async () => {
+        setText('Title line');
+        editor().setSelectionRange(0, 0);
+        doc.querySelector('[data-fmt="h2"]').click();
+        assert(editor().value === '## Title line', 'H2: ' + JSON.stringify(editor().value));
+        doc.querySelector('[data-fmt="ul"]').click();
+        assert(editor().value === '- ## Title line', 'bullet: ' + JSON.stringify(editor().value));
+        setText('');
+        doc.querySelector('[data-fmt="code-block"]').click();
+        assert(editor().value === '```\nyour code here\n```', 'code block: ' + JSON.stringify(editor().value));
+    });
+
+    h.test('editor keys: Enter continues a list, Tab indents', async () => {
+        setText('- one');
+        editor().focus();
+        editor().setSelectionRange(5, 5);
+        key(editor(), {key: 'Enter'});
+        assert(editor().value === '- one\n- ', 'list continued: ' + JSON.stringify(editor().value));
+        key(editor(), {key: 'Tab'});
+        assert(editor().value === '- one\n-   ', 'Tab indents: ' + JSON.stringify(editor().value));
+    });
+
+    const requested = () => win.performance.getEntriesByType('resource').map((e) => e.name.replace(win.location.origin + '/', ''));
+
+    h.test('boot does not load the export libraries, and starts the template\'s fonts', async () => {
+        const urls = requested();
+        const office = urls.filter((u) => /jszip|pptxgen|builtins-(save|restore)/.test(u));
+        assert(office.length === 0, 'requested at boot: ' + office.join(', '));
+        const fonts = urls.filter((u) => u.endsWith('.woff2'));
+        assert(fonts.some((u) => /source-code-pro-all-400-normal/.test(u)), 'the code font was requested: ' + fonts.join(', '));
+        const css = doc.getElementById('template-styles').textContent;
+        const family = ['Montserrat', 'Inter', 'Source Serif Pro'].find((f) => css.includes(`font-family: ${f}`) || css.includes(`'${f}'`) || css.includes(`${f},`));
+        assert(family, 'the template names a brand font');
+        const file = family.toLowerCase().replace(/ /g, '-');
+        assert(fonts.some((u) => u.includes(file + '-latin-400-normal')), `${family} 400 was requested at boot: ` + fonts.join(', '));
+    });
+
+    h.test('Word and PowerPoint export load their libraries on first use; trim and parseInt stay the browser\'s own', async () => {
+        // By identity: core-js makes its replacements' toString look native.
+        const orig = [win.String.prototype.trim, win.String.prototype.trimStart, win.parseInt, win.Number.parseFloat];
+        const sameAsBefore = () => [win.String.prototype.trim, win.String.prototype.trimStart, win.parseInt, win.Number.parseFloat]
+            .every((fn, i) => fn === orig[i]);
+        setText('# Example Co deck\n\n## Slide\n\ntext');
+        const exportAs = async (format, toast) => {
+            const f = doc.getElementById('export-format');
+            f.value = format;
+            f.dispatchEvent(new win.Event('change', {bubbles: true}));
+            doc.getElementById('btn-export').click();
+            await waitFor(() => (doc.querySelector('body > #toast') || {}).textContent === toast, toast + ', got ' + (doc.querySelector('body > #toast') || {}).textContent, 12000);
+        };
+        win.HTMLAnchorElement.prototype.click = () => {};   // no real download from the test
+        await exportAs('docx', 'Word document exported');
+        assert(typeof win.JSZip === 'function' && typeof win.PptxGenJS === 'undefined', 'Word loads JSZip only');
+        await exportAs('pptx', 'PowerPoint exported');
+        assert(typeof win.PptxGenJS === 'function', 'PptxGenJS loaded');
+        assert(sameAsBefore(), 'trim and parseInt are the browser\'s own after pptxgen loaded');
+        assert(!(Symbol.for('printmd.native-builtins') in win), 'the saved built-ins were put back and cleared');
+        const scripts = requested().filter((u) => /builtins-save|pptxgen|builtins-restore/.test(u));
+        assert(scripts.join(',') === 'js/builtins-save.js,vendor/pptxgenjs/pptxgen.bundle.js,js/builtins-restore.js', 'loaded in order: ' + scripts.join(','));
+    });
+
+    h.run();
+</script>
+</body>
+</html>

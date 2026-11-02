@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Importer Scale Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>Importers at scale: huge tables: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    // The heavy importer tests, kept apart from the fixture pages so no page nears
+    // the runner's 30 s page limit on a slow CI CPU. Speed is judged by growth
+    // (tests/lib/growth.js), never by a wall-clock budget.
+    import * as utils from '../js/import-utils.js';
+    import * as drive from '../js/google-drive-import.js';
+    import * as growth from './lib/growth.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTERS_SCALE');
+
+    const collector = () => {
+        const warnings = [];
+        return {warnings, onWarning: (m) => warnings.push(m)};
+    };
+
+    // Zip bombs are in importers-bombs.test.html.
+
+    // ── Huge tables ──────────────────────────────────────────────────────────
+    const BIG = 150000;
+
+    const csvOf = (rows) => 'Name,Value\n' + Array.from({length: rows}, (_, i) => `row ${i},${i}`).join('\n');
+
+    /**
+     * The row cap bounds the cost: a 150,000-row table must cost at most CAP_COST_RATIO
+     * times a 5,000-row one (about 4-5x with the cap, 30x or far more without it).
+     * Both runs are long, so a slower or throttled CPU stretches them alike.
+     * Returns the big run's result for the functional checks.
+     */
+    const CAP_COST_RATIO = 12;
+    async function boundedByCap(convert, make, label) {
+        const small = make(utils.MAX_TABLE_ROWS);
+        const big = make(BIG);
+        const tSmall = await growth.minTime(() => convert(small, {}), 2);   // the first run doubles as the warm-up
+        const opts = collector();
+        const t0 = performance.now();
+        const out = await convert(big, opts);
+        const tBig = performance.now() - t0;
+        assert(tBig < tSmall * CAP_COST_RATIO, `${label}: 150,000 rows took ${Math.round(tBig)} ms, ` +
+            `${(tBig / tSmall).toFixed(1)}x the ${Math.round(tSmall)} ms of 5,000 rows: the row cap is not bounding the work`);
+        return {out, opts};
+    }
+
+    h.test('a 150,000-row CSV becomes a 5,000-row table, with a warning, at about the cost of 5,000 rows', async () => {
+        const {out, opts} = await boundedByCap((csv, o) => drive.csvToMarkdown(csv, o), csvOf, 'CSV');
+        const lines = out.split('\n');
+        assert(lines.length === 1 + utils.MAX_TABLE_ROWS, 'table lines (5,000 rows plus the separator): ' + lines.length);
+        assert(lines[2] === '| row 0 | 0 |' && lines[lines.length - 1] === `| row ${utils.MAX_TABLE_ROWS - 2} | ${utils.MAX_TABLE_ROWS - 2} |`,
+            'first/last rows: ' + lines[2] + ' / ' + lines[lines.length - 1]);
+        assert(opts.warnings.length === 1 && /150,001 rows.*first 5,000/.test(opts.warnings[0]), 'warnings ' + JSON.stringify(opts.warnings));
+    });
+
+    // The 150,000-row HTML table is in importers-scale-html.test.html.
+
+    h.test('maxOf / minOf handle arrays far past the argument-spread limit', () => {
+        const big = Array.from({length: 1000000}, (_, i) => (i * 7919) % 1000003);
+        let max = -Infinity;
+        for (const v of big) if (v > max) max = v;
+        assert(utils.maxOf(big) === max, 'max ' + utils.maxOf(big));
+        assert(utils.minOf(big) === 0, 'min ' + utils.minOf(big));
+        assert(utils.maxOf([]) === -Infinity && utils.minOf([]) === Infinity, 'empty arrays');
+        assert(utils.maxOf([1, 9, 3], x => -x) === -1, 'with a mapper');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

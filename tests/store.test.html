@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Store Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>store.js tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    // Namespace import: a missing export fails that one test, not the whole page.
+    import * as store from '../js/store.js';
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+
+    const h = createHarness('STORE');
+
+    // ── Original smoke sequence ──────────────────────────────────────────────
+    h.test('smoke: upsert, get, listRecent order, delete, migration', async () => {
+        await resetStorage(store);
+        const docA = await store.upsertDoc({title: 'A', snapshot: '# A', templateId: 'example-co', origin: 'local'});
+        assert(docA.id, 'docA has id');
+        const fetchedA = await store.getDoc(docA.id);
+        assert(fetchedA.title === 'A' && fetchedA.snapshot === '# A', 'getDoc returns what was stored');
+        assert(fetchedA.origin === 'local' && fetchedA.templateId === 'example-co', 'origin and template stored');
+
+        await store.upsertDoc({title: 'B', snapshot: '# B', templateId: 'example-co', origin: 'local', updatedAt: Date.now() + 1000});
+        const recent = await store.listRecent();
+        assert(recent.length === 2, 'listRecent length === 2');
+        assert(recent[0].title === 'B' && recent[1].title === 'A', 'newest first');
+
+        await store.deleteDoc(docA.id);
+        assert((await store.getDoc(docA.id)) === undefined, 'deleted doc is gone');
+        assert((await store.listRecent()).length === 1, 'one doc left');
+
+        await resetStorage(store);
+        localStorage.setItem('printmd-state', JSON.stringify({source: '# Migrated Title\n\nbody', templateId: 'other-co', theme: 'dark'}));
+        const migrated = await store.migrateFromLocalStorage();
+        assert(migrated && migrated.title === 'Migrated Title', 'migration returns the doc');
+        assert(migrated.origin === 'local' && migrated.templateId === 'other-co', 'migrated fields');
+        assert((await store.migrateFromLocalStorage()) === null, 'second migrate is a no-op');
+        assert((await store.listRecent()).length === 1, 'one doc after migrate');
+        localStorage.removeItem('printmd-state');
+    });
+
+    // ── Scenario: transaction abort ──────────────────────────────────────────
+    h.test('a write whose transaction aborts after the request succeeded is rejected, not reported as saved', async () => {
+        await resetStorage(store);
+        await store.openDB();
+        const proto = IDBObjectStore.prototype;
+        const originalPut = proto.put;
+        proto.put = function (...args) {
+            const request = originalPut.apply(this, args);
+            // Simulate a failure at commit time (for example storage quota): the
+            // request itself succeeds, then the transaction is rolled back.
+            request.addEventListener('success', () => { try { this.transaction.abort(); } catch (_e) { /* already finished */ } });
+            return request;
+        };
+        let rejected = false;
+        try {
+            await store.upsertDoc({title: 'x', snapshot: '# x'});
+        } catch (_e) {
+            rejected = true;
+        } finally {
+            proto.put = originalPut;
+        }
+        assert(rejected, 'upsertDoc resolved although the transaction was rolled back');
+        assert((await store.listRecent()).length === 0, 'rolled-back write is visible in the store');
+    });
+
+    h.test('a delete whose transaction aborts is rejected', async () => {
+        await resetStorage(store);
+        const doc = await store.upsertDoc({title: 'keep', snapshot: '# keep'});
+        const proto = IDBObjectStore.prototype;
+        const originalDelete = proto.delete;
+        proto.delete = function (...args) {
+            const request = originalDelete.apply(this, args);
+            request.addEventListener('success', () => { try { this.transaction.abort(); } catch (_e) { /* done */ } });
+            return request;
+        };
+        let rejected = false;
+        try {
+            await store.deleteDoc(doc.id);
+        } catch (_e) {
+            rejected = true;
+        } finally {
+            proto.delete = originalDelete;
+        }
+        assert(rejected, 'deleteDoc resolved although the transaction was rolled back');
+        assert((await store.getDoc(doc.id)) !== undefined, 'the doc should still exist');
+    });
+
+    // ── Connection handling ──────────────────────────────────────────────────
+    h.test('concurrent openDB calls share one connection, and a version 2 database opens without an upgrade', async () => {
+        await resetStorage(store);
+        await store.openDB();
+        store.closeDB();
+        let opens = 0;
+        const realOpen = indexedDB.open.bind(indexedDB);
+        indexedDB.open = (...args) => { opens++; return realOpen(...args); };
+        try {
+            const [a, b] = await Promise.all([store.openDB(), store.openDB()]);
+            assert(a === b, 'two different connections were returned');
+            assert(opens === 1, `indexedDB.open was called ${opens} times`);
+        } finally {
+            delete indexedDB.open;
+        }
+    });
+
+    h.test('the cached connection steps aside so deleteDatabase is not blocked', async () => {
+        await resetStorage(store);
+        await store.openDB();
+        const outcome = await new Promise((resolve) => {
+            let wasBlocked = false;
+            const req = indexedDB.deleteDatabase('printmd');
+            req.onblocked = () => { wasBlocked = true; };
+            req.onsuccess = () => resolve(wasBlocked ? 'blocked' : 'ok');
+            req.onerror = () => resolve('error');
+            setTimeout(() => resolve('timeout'), 3000);
+        });
+        assert(outcome === 'ok', `deleteDatabase outcome: ${outcome}`);
+        const doc = await store.upsertDoc({title: 'after', snapshot: '# after'});
+        assert(doc.id, 'the store should reopen after the connection was released');
+    });
+
+    h.test('a failed open can be retried', async () => {
+        await resetStorage(store);
+        const realOpen = indexedDB.open.bind(indexedDB);
+        let calls = 0;
+        indexedDB.open = (...args) => {
+            calls++;
+            if (calls === 1) {
+                const fake = {};
+                setTimeout(() => { fake.error = new Error('simulated open failure'); fake.onerror && fake.onerror(); }, 0);
+                return fake;
+            }
+            return realOpen(...args);
+        };
+        try {
+            let failed = false;
+            await store.openDB().catch(() => { failed = true; });
+            assert(failed, 'the simulated failure should reject');
+            const db = await store.openDB();
+            assert(db, 'second attempt should open normally, not return the cached failure');
+        } finally {
+            delete indexedDB.open;
+        }
+    });
+
+    // ── Migration robustness ─────────────────────────────────────────────────
+    for (const [label, raw] of [['JSON null', 'null'], ['a JSON string', '"text"'], ['a non-string source', '{"source":42}'], ['a JSON array', '[1,2]']]) {
+        h.test(`migration ignores malformed saved state: ${label}`, async () => {
+            await resetStorage(store);
+            localStorage.setItem('printmd-state', raw);
+            let result;
+            try {
+                result = await store.migrateFromLocalStorage();
+            } finally {
+                localStorage.removeItem('printmd-state');
+            }
+            assert(result === null, 'malformed state must not create a doc');
+            assert((await store.listRecent()).length === 0, 'no doc should exist');
+        });
+    }
+
+    h.test('migration survives localStorage being unavailable', async () => {
+        await resetStorage(store);
+        const realGet = Storage.prototype.getItem;
+        Storage.prototype.getItem = () => { throw new DOMException('blocked', 'SecurityError'); };
+        let result;
+        try {
+            result = await store.migrateFromLocalStorage();
+        } finally {
+            Storage.prototype.getItem = realGet;
+        }
+        assert(result === null, 'should return null when storage cannot be read');
+    });
+
+    // ── In-memory fallback ───────────────────────────────────────────────────
+    h.test('memory store has the same behaviour as the IndexedDB store', async () => {
+        const mem = store.createMemoryStore();
+        const a = await mem.upsertDoc({title: 'A', snapshot: '# A', updatedAt: 1});
+        const b = await mem.upsertDoc({title: 'B', snapshot: '# B', updatedAt: 2});
+        assert(a.id && b.id && a.id !== b.id, 'ids are generated');
+        assert((await mem.getDoc(a.id)).title === 'A', 'getDoc');
+        const list = await mem.listRecent();
+        assert(list[0].title === 'B' && list[1].title === 'A', 'newest first');
+        assert((await mem.listRecent(1)).length === 1, 'limit respected');
+        await mem.deleteDoc(a.id);
+        assert((await mem.getDoc(a.id)) === undefined, 'deleted');
+        assert((await mem.migrateFromLocalStorage()) === null, 'no migration in memory');
+        assert(mem.isMemory === true, 'memory store says so');
+    });
+
+    // ── Version 2: indexes, paging and title search ──────────────────────────
+    /** Create the database as version 1 code did (no indexes) and fill it. */
+    async function createV1Database(docs) {
+        await resetStorage(store);
+        const db = await new Promise((resolve, reject) => {
+            const req = indexedDB.open('printmd', 1);
+            req.onupgradeneeded = () => req.result.createObjectStore('docs', {keyPath: 'id'});
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction('docs', 'readwrite');
+            for (const d of docs) tx.objectStore('docs').put(d);
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+        });
+        return db;
+    }
+
+    const V1_DOCS = [
+        {id: 'v1-a', title: 'Quarterly Report', snapshot: '# Quarterly Report\n\nfull text A', templateId: 'example-co', origin: 'local', updatedAt: 1000},
+        {id: 'v1-b', title: 'Café Notes', snapshot: '# Café Notes', origin: 'disk', fileName: 'notes.md', updatedAt: 3000},
+        {id: 'v1-c', title: 'Untitled', snapshot: 'no heading', origin: 'local', updatedAt: 2000},
+    ];
+
+    const ids = (docs) => docs.map((d) => d.id).join(',');
+
+    h.test('upgrade from version 1 keeps every document and adds the indexes', async () => {
+        (await createV1Database(V1_DOCS)).close();
+        const db = await store.openDB();
+        assert(db.version === 2, 'database version is ' + db.version);
+        const names = db.transaction('docs').objectStore('docs').indexNames;
+        assert(names.contains('updatedAt'), 'updatedAt index missing');
+        assert(names.contains('recentTitle'), 'recentTitle index missing');
+        for (const original of V1_DOCS) {
+            const d = await store.getDoc(original.id);
+            assert(d, original.id + ' lost in the upgrade');
+            for (const [k, v] of Object.entries(original)) assert(d[k] === v, `${original.id}.${k} changed: ${d[k]}`);
+        }
+        assert(ids(await store.listRecent()) === 'v1-b,v1-c,v1-a', 'order after upgrade: ' + ids(await store.listRecent()));
+        // Old records have no titleKey: search matches their title until the
+        // background repair (started by the first list) has added it.
+        assert(ids(await store.searchTitles('report')) === 'v1-a', 'search finds an old record');
+        assert(await store.indexRepair(), 'the repair finished');
+        assert((await store.getDoc('v1-a')).titleKey === 'quarterly report', 'old record migrated lazily');
+        assert(ids(await store.searchTitles('report')) === 'v1-a', 'search after the repair');
+        assert((await store.getDoc('v1-a')).snapshot === V1_DOCS[0].snapshot, 'migration kept the snapshot');
+    });
+
+    h.test('a save stores a lowercase titleKey and ties in updatedAt list in ascending id', async () => {
+        await resetStorage(store);
+        const saved = await store.upsertDoc({id: 'x1', title: 'Mixed CASE Title', snapshot: '', updatedAt: 5});
+        assert(saved.titleKey === 'mixed case title', 'titleKey: ' + saved.titleKey);
+        assert((await store.getDoc('x1')).titleKey === 'mixed case title', 'titleKey stored');
+        await store.upsertDoc({id: 'x3', title: 'c', updatedAt: 5});
+        await store.upsertDoc({id: 'x2', title: 'b', updatedAt: 5});
+        await store.upsertDoc({id: 'y', title: 'newest', updatedAt: 9});
+        assert(ids(await store.listRecent()) === 'y,x1,x2,x3', 'order: ' + ids(await store.listRecent()));
+        assert(ids(await store.listRecent(2)) === 'y,x1', 'limit');
+        assert(ids(await store.listRecent(10, {before: {updatedAt: 5, id: 'x1'}})) === 'x2,x3', 'after a tie');
+        assert(ids(await store.listRecent(10, {before: await store.getDoc('y')})) === 'x1,x2,x3', 'after a doc');
+        assert(await store.indexRepair(), 'repair');
+        assert(ids(await store.searchTitles('')) === 'y,x1,x2,x3', 'empty search, same order');
+        await store.upsertDoc({id: 'x0', title: 'b too', updatedAt: 5});
+        assert(ids(await store.searchTitles('b', 2)) === 'x0,x2', 'search keeps ascending ids in a tie: ' + ids(await store.searchTitles('b', 2)));
+        assert((await store.listRecent(0)).length === 0, 'limit 0');
+    });
+
+    h.test('listPage walks 120 documents newest first with no gaps or repeats', async () => {
+        await resetStorage(store);
+        const expected = [];
+        for (let i = 0; i < 120; i++) {
+            // Every third doc shares its timestamp with the one before it.
+            const doc = {id: 'p' + String(i).padStart(3, '0'), title: 'Doc ' + i, snapshot: '# Doc ' + i, updatedAt: 1000 + i - (i % 3 === 2 ? 1 : 0)};
+            await store.upsertDoc(doc);
+            expected.push(doc);
+        }
+        expected.sort((a, b) => (b.updatedAt - a.updatedAt) || (a.id < b.id ? -1 : 1));
+        const seen = [];
+        let cursor = null;
+        let pages = 0;
+        do {
+            const page = await store.listPage({limit: 25, cursor});
+            assert(page.docs.length <= 25, 'page too long');
+            seen.push(...page.docs);
+            cursor = page.nextCursor;
+            pages++;
+            assert(pages < 10, 'paging does not end');
+        } while (cursor);
+        assert(pages === 5, 'pages: ' + pages);
+        assert(ids(seen) === ids(expected), 'pages differ from the full order');
+        const last = await store.listPage({limit: 20, cursor: {updatedAt: expected[99].updatedAt, id: expected[99].id}});
+        assert(last.docs.length === 20 && last.nextCursor === null, 'an exact last page has no next cursor');
+    });
+
+    h.test('listPage and listRecent read through the updatedAt index, not a full scan', async () => {
+        await resetStorage(store);
+        for (let i = 0; i < 5; i++) await store.upsertDoc({id: 'i' + i, title: 'T' + i, updatedAt: i});
+        await store.indexRepair();   // open and finish the index check first
+        const storeProto = IDBObjectStore.prototype;
+        const realScan = storeProto.openCursor;
+        let scans = 0;
+        storeProto.openCursor = function (...args) { scans++; return realScan.apply(this, args); };
+        try {
+            assert(ids((await store.listPage({limit: 2})).docs) === 'i4,i3', 'first page');
+            assert(ids(await store.listRecent(3)) === 'i4,i3,i2', 'listRecent');
+        } finally {
+            storeProto.openCursor = realScan;
+        }
+        assert(scans === 0, `the object store was scanned ${scans} times`);
+    });
+
+    h.test('searchTitles matches a case-insensitive substring, newest first, and loads only the matches', async () => {
+        await resetStorage(store);
+        await store.upsertDoc({id: 's1', title: 'Budget 2026', snapshot: 'x'.repeat(1000), updatedAt: 1});
+        await store.upsertDoc({id: 's2', title: 'Café plan', snapshot: '', updatedAt: 2});
+        await store.upsertDoc({id: 's3', title: 'Team BUDGET review', snapshot: '', updatedAt: 3});
+        await store.upsertDoc({id: 's4', title: 'Other', snapshot: 'budget is in the body only', updatedAt: 4});
+        await store.indexRepair();
+        const storeProto = IDBObjectStore.prototype;
+        const indexProto = IDBIndex.prototype;
+        const realGet = storeProto.get;
+        const realScan = storeProto.openCursor;
+        const realIndexScan = indexProto.openCursor;
+        let gets = 0;
+        let valueScans = 0;
+        storeProto.get = function (...args) { gets++; return realGet.apply(this, args); };
+        storeProto.openCursor = function (...args) { valueScans++; return realScan.apply(this, args); };
+        indexProto.openCursor = function (...args) { valueScans++; return realIndexScan.apply(this, args); };
+        let found;
+        try {
+            found = await store.searchTitles('budget');
+        } finally {
+            storeProto.get = realGet;
+            storeProto.openCursor = realScan;
+            indexProto.openCursor = realIndexScan;
+        }
+        assert(ids(found) === 's3,s1', 'matches: ' + ids(found));
+        assert(found[1].snapshot.length === 1000, 'results are whole documents');
+        assert(valueScans === 0, 'search opened a value cursor');
+        assert(gets === 2, `search loaded ${gets} records for 2 matches`);
+        assert(ids(await store.searchTitles('  CAFÉ ')) === 's2', 'case, accents and spaces');
+        assert(ids(await store.searchTitles('café')) === 's2', 'NFD query matches an NFC title');
+        assert(ids(await store.searchTitles('budget', 1)) === 's3', 'limit');
+        assert((await store.searchTitles('nothing like this')).length === 0, 'no match');
+        assert(ids(await store.searchTitles('')) === 's4,s3,s2,s1', 'empty query lists recent docs');
+    });
+
+    h.test('the memory store gives the same results for paging and search', async () => {
+        await resetStorage(store);
+        const mem = store.createMemoryStore();
+        const docs = [];
+        for (let i = 0; i < 30; i++) docs.push({id: 'm' + String(i).padStart(2, '0'), title: (i % 4 ? 'Note ' : 'Plan ') + i, snapshot: '', updatedAt: 100 + Math.floor(i / 2)});
+        for (const d of docs) { await store.upsertDoc(d); await mem.upsertDoc(d); }
+        assert(ids(await mem.listRecent()) === ids(await store.listRecent()), 'listRecent differs');
+        for (const s of [store, mem]) assert((await s.getDoc('m03')).titleKey === 'note 3', 'titleKey');
+        let a = {nextCursor: null};
+        let b = {nextCursor: null};
+        do {
+            a = await store.listPage({limit: 7, cursor: a.nextCursor});
+            b = await mem.listPage({limit: 7, cursor: b.nextCursor});
+            assert(ids(a.docs) === ids(b.docs), `page differs: ${ids(a.docs)} / ${ids(b.docs)}`);
+            assert(JSON.stringify(a.nextCursor) === JSON.stringify(b.nextCursor), 'cursor differs');
+        } while (a.nextCursor);
+        for (const q of ['plan', 'NOTE 1', '', 'zzz']) {
+            assert(ids(await store.searchTitles(q, 5)) === ids(await mem.searchTitles(q, 5)), 'search differs for ' + JSON.stringify(q));
+        }
+        assert(ids(await mem.listRecent(5, {before: {updatedAt: 110, id: 'm20'}})) ===
+            ids(await store.listRecent(5, {before: {updatedAt: 110, id: 'm20'}})), 'before differs');
+    });
+
+    h.test('concurrent calls while a version 1 database upgrades share one open and see all data', async () => {
+        // One open at the stored version, then one at version 2 for the upgrade.
+        (await createV1Database(V1_DOCS)).close();
+        let opens = 0;
+        const realOpen = indexedDB.open.bind(indexedDB);
+        indexedDB.open = (...args) => { opens++; return realOpen(...args); };
+        let results;
+        try {
+            results = await Promise.all([store.listRecent(), store.searchTitles('notes'), store.getDoc('v1-c'), store.listPage({limit: 2})]);
+        } finally {
+            delete indexedDB.open;
+        }
+        assert(opens === 2, `indexedDB.open was called ${opens} times`);
+        assert(ids(results[0]) === 'v1-b,v1-c,v1-a', 'listRecent: ' + ids(results[0]));
+        assert(ids(results[1]) === 'v1-b', 'search: ' + ids(results[1]));
+        assert(results[2] && results[2].snapshot === 'no heading', 'getDoc');
+        assert(ids(results[3].docs) === 'v1-b,v1-c' && results[3].nextCursor, 'listPage');
+    });
+
+    h.test('an upgrade blocked by an old connection completes once that connection closes', async () => {
+        const old = await createV1Database(V1_DOCS);   // no onversionchange: it does not step aside
+        const realOpen = indexedDB.open.bind(indexedDB);
+        let blocked = false;
+        indexedDB.open = (...args) => {
+            const req = realOpen(...args);
+            req.addEventListener('blocked', () => { blocked = true; setTimeout(() => old.close(), 50); });
+            return req;
+        };
+        let db;
+        try {
+            db = await store.openDB();
+        } finally {
+            delete indexedDB.open;
+        }
+        assert(blocked, 'the open was never blocked');
+        assert(db.version === 2, 'version ' + db.version);
+        assert(ids(await store.listRecent()) === 'v1-b,v1-c,v1-a', 'data after a blocked upgrade');
+    });
+
+    h.test('onUpgrading is called when the open\'s own upgrade starts, and not for an open at the current version', async () => {
+        const old = await createV1Database(V1_DOCS);
+        old.close();
+        let upgrading = 0;
+        await store.openDB({onUpgrading: () => { upgrading++; }});
+        assert(upgrading === 1, 'called once for the version 1 to 2 upgrade: ' + upgrading);
+        store.closeDB();
+        await store.openDB({onUpgrading: () => { upgrading++; }});
+        assert(upgrading === 1, 'not called again at version 2: ' + upgrading);
+    });
+
+    h.test('an upgrade that stays blocked is rejected with a clear error after the set wait, then retried', async () => {
+        const old = await createV1Database(V1_DOCS);
+        let message = '';
+        // The wait is cut to 300 ms here: if the store ignored the setting it would
+        // wait the default 5 s, and this 3 s limit fails the test.
+        store.setOpenBlockedTimeout(300);
+        let limit;
+        try {
+            await Promise.race([
+                store.openDB(),
+                new Promise((_, reject) => { limit = setTimeout(() => reject(new Error('still waiting after 3 s')), 3000); }),
+            ]);
+        } catch (e) {
+            message = e.message;
+        } finally {
+            clearTimeout(limit);
+            store.setOpenBlockedTimeout();   // back to the 5 s default
+        }
+        assert(/blocked by another/i.test(message), 'expected a blocked error within 3 s, got: ' + (message || 'success'));
+        old.close();
+        assert(ids(await store.listRecent()) === 'v1-b,v1-c,v1-a', 'the next call opens and upgrades');
+    });
+
+    h.test('a database at a later version opens as it is, with no VersionError and no upgrade', async () => {
+        await resetStorage(store);
+        // As code after this one might leave it: version 3, same store and indexes.
+        const later = await new Promise((resolve, reject) => {
+            const req = indexedDB.open('printmd', 3);
+            req.onupgradeneeded = () => {
+                const s = req.result.createObjectStore('docs', {keyPath: 'id'});
+                s.createIndex('updatedAt', 'updatedAt');
+                s.createIndex('recentTitle', ['updatedAt', 'id', 'titleKey']);
+                s.put({id: 'l1', title: 'Later', titleKey: 'later', snapshot: '# Later', updatedAt: 7});
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+        later.close();
+        const db = await store.openDB();
+        assert(db.version === 3, 'version changed to ' + db.version);
+        assert(ids(await store.listRecent()) === 'l1', 'reads the later database');
+        await store.upsertDoc({id: 'l2', title: 'Saved here', updatedAt: 8});
+        assert(ids(await store.searchTitles('saved')) === 'l2', 'search works');
+    });
+
+    h.test('the repair turns a numeric string time into its number and only a missing one into 0', async () => {
+        (await createV1Database([
+            {id: 'str', title: 'String time', snapshot: '', updatedAt: '2500'},
+            {id: 'nul', title: 'No time', snapshot: '', updatedAt: null},
+            {id: 'num', title: 'Number time', snapshot: '', updatedAt: 2000},
+        ])).close();
+        await store.listRecent();
+        assert(await store.indexRepair(), 'repair');
+        assert((await store.getDoc('str')).updatedAt === 2500, 'string time: ' + (await store.getDoc('str')).updatedAt);
+        assert((await store.getDoc('nul')).updatedAt === 0, 'missing time');
+        assert(ids(await store.listRecent()) === 'str,num,nul', 'order: ' + ids(await store.listRecent()));
+    });
+
+    h.test('the first list does not wait for the repair, which runs in chunks of 50', async () => {
+        const docs = [];
+        for (let i = 0; i < 160; i++) docs.push({id: 'c' + String(i).padStart(3, '0'), title: 'Chunk ' + i, snapshot: '# ' + i, updatedAt: 1000 + i});
+        (await createV1Database(docs)).close();
+        const realTx = IDBDatabase.prototype.transaction;
+        let writes = 0;
+        IDBDatabase.prototype.transaction = function (names, mode, ...rest) {
+            if (mode === 'readwrite') writes++;
+            return realTx.call(this, names, mode, ...rest);
+        };
+        let repaired = false;
+        try {
+            const first = store.listRecent(1);
+            const repair = store.indexRepair().then((ok) => { repaired = ok; });
+            assert(ids(await first) === 'c159', 'first doc');
+            assert(!repaired, 'the first list waited for the repair');
+            await repair;
+        } finally {
+            IDBDatabase.prototype.transaction = realTx;
+        }
+        assert(repaired, 'the repair finished');
+        assert(writes >= 4, `the repair used ${writes} write transactions for 160 records`);
+        assert((await store.getDoc('c000')).titleKey === 'chunk 0', 'first chunk repaired');
+        assert((await store.getDoc('c159')).titleKey === 'chunk 159', 'last chunk repaired');
+    });
+
+    h.test('a failing repair is tried twice per session, and search still finds unrepaired docs by title', async () => {
+        // A separate instance of the module, so its failure count does not affect the other tests.
+        const fresh = await import('../js/store.js?repair-fails');
+        (await createV1Database(V1_DOCS)).close();
+        const realUpdate = IDBCursor.prototype.update;
+        let attempts = 0;
+        IDBCursor.prototype.update = function () {
+            attempts++;
+            throw new DOMException('simulated quota', 'QuotaExceededError');
+        };
+        try {
+            for (let i = 0; i < 4; i++) {
+                assert(ids(await fresh.listRecent()) === 'v1-b,v1-c,v1-a', 'listing during failed repairs');
+                await fresh.indexRepair();
+            }
+            assert(ids(await fresh.searchTitles('café')) === 'v1-b', 'search falls back to the title');
+            assert(ids(await fresh.searchTitles('QUARTERLY')) === 'v1-a', 'case-insensitive fallback');
+        } finally {
+            IDBCursor.prototype.update = realUpdate;
+            fresh.closeDB();
+        }
+        assert(attempts === 2, `the repair ran ${attempts} times`);
+    });
+
+    h.run();
+</script>
+</body>
+</html>

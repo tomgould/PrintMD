@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Queued open timeout Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>A tab queued behind another tab's waiting upgrade gives up with a clear banner</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    // Tab C (this page's app) opens while tab B's upgrade waits behind the old tab,
+    // which never closes. C's open never gets a "blocked" event and never settles,
+    // so only the app's own timer can end the wait (cut to 300 ms here).
+    import {createHarness, assert} from './lib/harness.js';
+    import {bootHereBehindOldTab, shown, waitFor, waitNote} from './lib/old-tab.js';
+
+    const h = createHarness('BLOCKEDQUEUED');
+
+    h.test('the note shows, then the banner explains the memory fallback; a late open is let go', async () => {
+        const {old, tabB, win, doc, booted} = await bootHereBehindOldTab(300, {behindTabB: true});
+        try {
+            await waitFor(() => shown(waitNote(doc)), 'the wait note', 3000);
+            await waitFor(() => win.__bd.usingMemoryStore, 'the memory fallback within 3 s', 3000);
+            await booted;
+            assert(!shown(waitNote(doc)), 'wait note hidden');
+            const banner = doc.getElementById('storage-banner');
+            assert(!banner.hidden && /another PrintMD tab/i.test(banner.textContent), 'banner: ' + banner.textContent);
+            assert(!doc.getElementById('editor').readOnly, 'the editor is usable (memory only)');
+        } finally {
+            old.close();
+        }
+        // The open that was given up on can complete now: the session stays on the
+        // memory store, as the banner said, and the editor keeps its text.
+        const text = doc.getElementById('editor').value;
+        await tabB;
+        await new Promise((r) => setTimeout(r, 300));
+        assert(win.__bd.usingMemoryStore, 'still on the memory store');
+        assert(doc.getElementById('editor').value === text, 'the editor text is unchanged');
+        // The late connection was let go (the app called closeDB when it gave up),
+        // so it is not kept open: the next store call opens a connection of its own.
+        const store = await import('../js/store.js');
+        const realOpen = indexedDB.open.bind(indexedDB);
+        let opens = 0;
+        indexedDB.open = (...args) => { opens++; return realOpen(...args); };
+        try {
+            await store.listRecent(1);
+        } finally {
+            delete indexedDB.open;
+        }
+        assert(opens >= 1, 'the given-up connection was reused instead of closed');
+        store.closeDB();
+    });
+
+    h.run();
+</script>
+</body>
+</html>

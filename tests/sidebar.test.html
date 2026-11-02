@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sidebar Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        #fixture { height: 200px; overflow: auto; border: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+<h1>js/sidebar.js: paging and title search</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<div id="fixture"></div>
+<script type="module">
+    import {createHarness, assert} from './lib/harness.js';
+    import {createMemoryStore} from '../js/store.js';
+    import {createSidebar} from '../js/sidebar.js';
+
+    const h = createHarness('SIDEBAR');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const DELAY = 40;   // the search delay used here (the app waits longer)
+
+    async function waitFor(fn, what, ms = 4000) {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+            if (fn()) return;
+            await sleep(10);
+        }
+        throw new Error('timed out waiting for ' + what);
+    }
+
+    /** 120 documents "Example Co doc 1" (oldest) to "Example Co doc 120" (newest). */
+    async function seeded(n = 120) {
+        const store = createMemoryStore();
+        const base = Date.UTC(2026, 0, 1);
+        for (let i = 1; i <= n; i++) {
+            await store.upsertDoc({id: 'd' + String(i).padStart(3, '0'), title: 'Example Co doc ' + i, snapshot: '# Example Co doc ' + i, updatedAt: base + i * 1000});
+        }
+        return store;
+    }
+
+    /** A store that records its calls; searchTitles can be held until released. */
+    function spied(store, {holdSearch = false} = {}) {
+        const calls = [];
+        const held = [];
+        return {
+            calls, held,
+            store: {
+                ...store,
+                async listPage(opts) { calls.push(['listPage', opts]); return store.listPage(opts); },
+                async listRecent(...a) { calls.push(['listRecent', a]); return store.listRecent(...a); },
+                async searchTitles(q, limit) {
+                    calls.push(['searchTitles', q, limit]);
+                    if (!holdSearch) return store.searchTitles(q, limit);
+                    return new Promise((resolve) => held.push({q, release: async () => resolve(await store.searchTitles(q, limit))}));
+                },
+            },
+        };
+    }
+
+    function mount(store, {currentId = null} = {}) {
+        const fixture = document.getElementById('fixture');
+        fixture.innerHTML = '<input class="doc-filter"><ul></ul><button class="doc-more" type="button" hidden>Show more</button><textarea class="ed"></textarea>';
+        const announced = [];
+        const opened = [];
+        const sidebar = createSidebar({
+            list: fixture.querySelector('ul'),
+            filter: fixture.querySelector('.doc-filter'),
+            more: fixture.querySelector('.doc-more'),
+            editor: fixture.querySelector('.ed'),
+            getStore: () => store,
+            currentId: () => currentId,
+            openDoc: async (id) => { opened.push(id); },
+            removeDoc: async (id) => { await store.deleteDoc(id); },
+            confirm: () => true,
+            announce: (m) => announced.push(m),
+            searchDelayMs: DELAY,
+        });
+        sidebar.attach();
+        const titles = () => [...fixture.querySelectorAll('ul .doc-item .doc-title')].map(t => t.textContent);
+        const more = fixture.querySelector('.doc-more');
+        const filter = fixture.querySelector('.doc-filter');
+        const type = (text) => { filter.value = text; filter.dispatchEvent(new Event('input', {bubbles: true})); };
+        return {sidebar, titles, more, filter, type, announced, opened, fixture};
+    }
+
+    h.test('the first page is the 50 newest documents, with a Show more button', async () => {
+        const s = spied(await seeded());
+        const m = mount(s.store);
+        await m.sidebar.render();
+        const t = m.titles();
+        assert(t.length === 50, 'listed ' + t.length);
+        assert(t[0] === 'Example Co doc 120' && t[49] === 'Example Co doc 71', 'newest first: ' + t[0] + ' .. ' + t[49]);
+        assert(!m.more.hidden, 'Show more is shown while older documents exist');
+        assert(s.calls.some(([name, o]) => name === 'listPage' && o.limit === 50 && !o.cursor), 'read with listPage({limit: 50})');
+    });
+
+    h.test('Show more loads the next page from the cursor, moves focus to the first new item and says so', async () => {
+        const s = spied(await seeded());
+        const m = mount(s.store);
+        await m.sidebar.render();
+        m.more.focus();
+        s.calls.length = 0;
+        await m.sidebar.showMore();
+        assert(m.titles().length === 100, 'after one Show more: ' + m.titles().length);
+        const page = s.calls.find(([name]) => name === 'listPage');
+        assert(page && page[1].cursor && page[1].cursor.id === 'd071', 'next page read from the cursor: ' + JSON.stringify(page));
+        assert(document.activeElement.closest('.doc-item').querySelector('.doc-title').textContent === 'Example Co doc 70', 'focus on the first new item');
+        assert(document.activeElement.tabIndex === 0, 'the first new item is the list\'s Tab stop');
+        assert(m.announced.at(-1) === 'Showing 100 documents', 'announced: ' + m.announced.at(-1));
+        await m.sidebar.showMore();
+        assert(m.titles().length === 120 && m.titles()[119] === 'Example Co doc 1', 'all 120 listed');
+        assert(m.more.hidden, 'Show more is hidden on the last page');
+        assert(m.announced.at(-1) === 'Showing all 120 documents', 'announced: ' + m.announced.at(-1));
+    });
+
+    h.test('a later refresh keeps every page that was shown, in order, and Show more carries on without repeats', async () => {
+        const store = await seeded();
+        const m = mount(store);
+        await m.sidebar.render();
+        await m.sidebar.showMore();
+        await store.upsertDoc({...(await store.getDoc('d005')), updatedAt: Date.UTC(2027, 0, 1)});
+        await m.sidebar.render();
+        const t = m.titles();
+        assert(t[0] === 'Example Co doc 5' && t[1] === 'Example Co doc 120', 'a saved doc moves to the top: ' + t.slice(0, 2));
+        assert(t.length === 101 && t.at(-1) === 'Example Co doc 21', 'everything shown before is still shown: ' + t.length + ', last ' + t.at(-1));
+        assert(!m.more.hidden, 'more still to show');
+        await m.sidebar.showMore();
+        const all = m.titles();
+        assert(all.length === 120 && new Set(all).size === 120, 'all 120 once each: ' + all.length + ' / ' + new Set(all).size);
+        assert(m.more.hidden, 'nothing more');
+    });
+
+    h.test('deleting a document listed on a later page removes it from the list', async () => {
+        const store = await seeded();
+        const m = mount(store);
+        await m.sidebar.render();
+        await m.sidebar.showMore();
+        const row = [...m.fixture.querySelectorAll('ul .doc-item')].find((li) => li.querySelector('.doc-title').textContent === 'Example Co doc 30');
+        assert(row, 'doc 30 is listed on the second page');
+        row.querySelector('.doc-del').click();
+        await waitFor(() => !m.titles().includes('Example Co doc 30'), 'doc 30 gone from the list');
+        assert((await store.getDoc('d030')) === undefined, 'deleted from the store');
+        assert(m.titles().length === 99, 'the rest still listed: ' + m.titles().length);
+    });
+
+    h.test('a refresh reads one page however many documents are listed (no growth with the list)', async () => {
+        const s = spied(await seeded(180));
+        const m = mount(s.store);
+        await m.sidebar.render();
+        while (!m.more.hidden) await m.sidebar.showMore();
+        assert(m.titles().length === 180, 'all listed: ' + m.titles().length);
+        s.calls.length = 0;
+        await m.sidebar.render();
+        const reads = s.calls.filter(([n]) => n === 'listPage' || n === 'listRecent');
+        assert(reads.length === 1 && reads[0][1].limit === 50 && !reads[0][1].cursor, 'one first-page read: ' + JSON.stringify(reads));
+        assert(m.titles().length === 180, 'still all listed: ' + m.titles().length);
+    });
+
+    h.test('the sidebar keeps list fields only: no document text for anything it lists or finds', async () => {
+        const store = createMemoryStore();
+        for (let i = 1; i <= 60; i++) {
+            await store.upsertDoc({id: 'b' + String(i).padStart(3, '0'), title: 'Example Co big ' + i, fileName: i === 3 ? 'example-co-big.md' : undefined,
+                snapshot: 'x'.repeat(20000), templateId: 'example-co', diskSyncedHash: 'h', handleRef: {kind: 'file'}, updatedAt: 1000 + i});
+        }
+        const m = mount(store);
+        await m.sidebar.render();
+        await m.sidebar.showMore();
+        const allowed = new Set(['id', 'title', 'fileName', 'updatedAt', 'lastOpenedAt', 'origin']);
+        const listed = m.sidebar.listed();
+        assert(listed.length === 60, 'listed ' + listed.length);
+        const extra = [...new Set(listed.flatMap((d) => Object.keys(d)))].filter((k) => !allowed.has(k));
+        assert(extra.length === 0, 'kept fields beyond the list: ' + extra.join(', '));
+        assert(listed.find((d) => d.id === 'b003').fileName === 'example-co-big.md', 'file name kept for the label and the search');
+        m.type('big 1');
+        await waitFor(() => m.titles().length > 0 && m.titles().every((t) => t.includes('big 1')), 'search results');
+        const shown = m.sidebar.listed({shown: true});
+        assert(shown.every((d) => !('snapshot' in d)), 'search results keep no text');
+    });
+
+    h.test('the search box finds titles in every stored document, not only the listed ones', async () => {
+        const s = spied(await seeded());
+        const m = mount(s.store);
+        await m.sidebar.render();
+        m.type('doc 7');
+        await waitFor(() => m.titles().length && m.titles().every(t => t.includes('doc 7')), 'search results');
+        const t = m.titles();
+        assert(t.length === 11 && t.includes('Example Co doc 7') && t.includes('Example Co doc 70'), 'doc 7 and doc 70..79: ' + JSON.stringify(t));
+        assert(m.more.hidden, 'no Show more for 11 matches');
+        assert(m.announced.at(-1) === '11 documents match', 'announced: ' + m.announced.at(-1));
+        m.type('DOC 7');
+        await sleep(DELAY * 3);
+        assert(m.titles().length === 11, 'case is ignored');
+        assert(m.announced.filter(a => a === '11 documents match').length === 1, 'the same result count is not announced twice: ' + JSON.stringify(m.announced));
+    });
+
+    h.test('typing waits for a pause: one query for a burst of keystrokes', async () => {
+        const s = spied(await seeded());
+        const m = mount(s.store);
+        await m.sidebar.render();
+        s.calls.length = 0;
+        for (const text of ['d', 'do', 'doc', 'doc ', 'doc 1', 'doc 12']) m.type(text);
+        await waitFor(() => s.calls.some(([n]) => n === 'searchTitles'), 'the search ran');
+        await sleep(DELAY * 3);
+        const searches = s.calls.filter(([n]) => n === 'searchTitles');
+        assert(searches.length === 1 && searches[0][1] === 'doc 12', 'one query for the last text: ' + JSON.stringify(searches));
+    });
+
+    h.test('a stale query never paints: one query at a time, and the last text always runs', async () => {
+        const s = spied(await seeded(), {holdSearch: true});
+        const m = mount(s.store);
+        await m.sidebar.render();
+        const before = m.titles().join('|');
+        m.type('doc 3');
+        await waitFor(() => s.held.length === 1, 'first query started');
+        m.type('doc 4');
+        await sleep(DELAY * 3);
+        assert(s.held.length === 1, 'no second query while the first runs: ' + s.held.length);
+        await s.held[0].release();
+        await sleep(10);
+        // Either the old list or "Searching…" (the wait passed 150 ms), never doc 3's matches.
+        const now = m.titles().join('|');
+        assert(now === before || m.fixture.querySelector('ul').textContent === 'Searching…', 'the stale "doc 3" results were not shown: ' + now.slice(0, 80));
+        await waitFor(() => s.held.length === 2, 'the newest text ran next');
+        assert(s.held[1].q === 'doc 4', 'second query: ' + s.held[1].q);
+        await s.held[1].release();
+        await waitFor(() => m.titles().length && m.titles().every(t => t.includes('doc 4')), 'doc 4 results');
+    });
+
+    h.test('a search that takes a while shows and announces "Searching…" instead of the old results, then the matches', async () => {
+        const s = spied(await seeded(), {holdSearch: true});
+        const m = mount(s.store);
+        await m.sidebar.render();
+        m.type('doc 3');
+        await waitFor(() => s.held.length === 1, 'the query started');
+        await waitFor(() => m.fixture.querySelector('ul').textContent === 'Searching…', 'the searching state');
+        assert(m.titles().length === 0, 'the previous results are gone');
+        assert(m.more.hidden, 'no Show more while searching');
+        assert(m.announced.at(-1) === 'Searching…', 'announced: ' + m.announced.at(-1));
+        await s.held[0].release();
+        await waitFor(() => m.titles().length === 11, 'the matches for doc 3');
+        assert(m.announced.at(-1) === '11 documents match', 'the count follows: ' + m.announced.at(-1));
+    });
+
+    h.test('a quick search never flashes "Searching…"', async () => {
+        const m = mount(await seeded());
+        await m.sidebar.render();
+        m.type('doc 4');
+        await waitFor(() => m.titles().length === 11, 'the matches');
+        await sleep(200);
+        assert(!m.announced.includes('Searching…'), 'announced: ' + JSON.stringify(m.announced));
+    });
+
+    h.test('the search also matches the file name a listed document is shown by', async () => {
+        const store = await seeded(3);
+        await store.upsertDoc({id: 'file', title: 'Quarterly figures', fileName: 'example-co-notes.md', snapshot: '# Quarterly figures', updatedAt: Date.UTC(2026, 5, 1)});
+        const m = mount(store);
+        await m.sidebar.render();
+        m.type('notes');
+        await waitFor(() => m.titles().length === 1, 'one match');
+        assert(m.titles()[0] === 'example-co-notes.md', 'matched by file name: ' + m.titles()[0]);
+        m.type('quarterly');
+        await waitFor(() => m.titles()[0] === 'example-co-notes.md', 'matched by title, shown by file name');
+    });
+
+    h.test('Show more in a search widens it; no match says so; Escape clears and returns to the editor', async () => {
+        const m = mount(await seeded());
+        await m.sidebar.render();
+        m.type('example co');
+        await waitFor(() => m.titles().length === 50 && !m.more.hidden, '50 of 120 matches');
+        await m.sidebar.showMore();
+        assert(m.titles().length === 100, 'search widened to 100: ' + m.titles().length);
+        m.type('nothing like this');
+        await waitFor(() => m.fixture.querySelector('ul').textContent === 'No files match', 'empty state');
+        assert(m.more.hidden, 'no Show more without matches');
+        assert(m.announced.at(-1) === 'No documents match', 'announced: ' + m.announced.at(-1));
+        m.filter.focus();
+        m.filter.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+        await waitFor(() => m.titles().length === 50, 'recent list back');
+        assert(m.filter.value === '' && document.activeElement === m.fixture.querySelector('.ed'), 'cleared, focus on the editor');
+    });
+
+    h.test('arrow keys with Ctrl, Alt or Meta are left to the browser: focus stays put', async () => {
+        const m = mount(await seeded(5));
+        await m.sidebar.render();
+        const opens = () => [...m.fixture.querySelectorAll('ul .doc-open')];
+        opens()[1].focus();
+        for (const mod of ['ctrlKey', 'altKey', 'metaKey']) {
+            for (const key of ['ArrowDown', 'ArrowUp', 'Home', 'End']) {
+                const e = new KeyboardEvent('keydown', {key, [mod]: true, bubbles: true, cancelable: true});
+                opens()[1].dispatchEvent(e);
+                assert(document.activeElement === opens()[1], `${mod}+${key} moved focus`);
+                assert(!e.defaultPrevented, `${mod}+${key} default prevented`);
+            }
+        }
+        opens()[1].dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true}));
+        assert(document.activeElement === opens()[2], 'a plain ArrowDown still moves');
+    });
+
+    h.test('a failing store leaves the list as it was', async () => {
+        const store = await seeded(5);
+        const m = mount(store);
+        await m.sidebar.render();
+        store.listPage = async () => { throw new Error('gone'); };
+        await m.sidebar.render();
+        assert(m.titles().length === 5, 'kept: ' + m.titles().length);
+    });
+
+    h.run();
+</script>
+</body>
+</html>

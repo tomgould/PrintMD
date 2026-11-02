@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>UI preferences Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        iframe { width: 1400px; height: 900px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>UI preferences: the divider, theme, view and sidebar survive a reload; garbage and blocked storage are harmless</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<iframe id="app" title="app under test"></iframe>
+<script type="module">
+    import * as store from '../js/store.js';
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+
+    const h = createHarness('UIPREFS');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const frame = document.getElementById('app');
+    const KEYS = {split: 'printmd-split', theme: 'printmd-theme', view: 'printmd-view', sidebar: 'printmd-sidebar-collapsed'};
+    let win, doc;
+
+    async function waitFor(fn, what, ms = 8000) {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+            try { if (fn()) return; } catch (_e) { /* not ready */ }
+            await sleep(30);
+        }
+        throw new Error('timed out waiting for ' + what);
+    }
+
+    async function boot(reload = false) {
+        const loaded = new Promise(res => frame.addEventListener('load', res, {once: true}));
+        if (reload) frame.contentWindow.location.reload(); else frame.src = '../index.html';
+        await loaded;
+        win = frame.contentWindow;
+        doc = frame.contentDocument;
+        await waitFor(() => win.__bd && win.__bd.docManager.currentId != null && !$('editor').readOnly, 'app boot');
+    }
+
+    const $ = (id) => doc.getElementById(id);
+    const setKeys = (values) => {
+        for (const k of Object.values(KEYS)) localStorage.removeItem(k);
+        for (const [k, v] of Object.entries(values)) localStorage.setItem(KEYS[k], v);
+    };
+    const key = (k, init = {}) => $('divider').dispatchEvent(new win.KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true, ...init}));
+    const split = () => Number($('divider').getAttribute('aria-valuenow'));
+    /** The editor's rendered share of the panes, in percent. */
+    const editorShare = () => {
+        const e = $('editor-pane').getBoundingClientRect().width;
+        const p = $('preview-pane').getBoundingClientRect().width;
+        return (e / (e + p)) * 100;
+    };
+    const view = () => ['split', 'editor', 'preview'].find((v) => $('main').classList.contains('view-' + v));
+    const theme = () => doc.documentElement.getAttribute('data-theme');
+    const collapsed = () => $('sidebar').classList.contains('collapsed');
+
+    function drag(toPct) {
+        const rect = $('main').getBoundingClientRect();
+        const x = rect.left + (rect.width * toPct) / 100;
+        const at = (type, target) => target.dispatchEvent(new win.MouseEvent(type, {bubbles: true, cancelable: true, clientX: x, clientY: rect.top + 50}));
+        at('mousedown', $('divider'));
+        at('mousemove', doc);
+        at('mouseup', doc);
+    }
+
+    h.test('keyboard resize, theme, view and sidebar are all back after a reload', async () => {
+        await resetStorage(store);
+        setKeys({theme: 'light'});
+        await boot();
+        assert(split() === 50 && view() === 'split' && theme() === 'light' && !collapsed(), 'defaults first');
+        key('Home');
+        key('ArrowRight');
+        assert(split() === 22, 'keyboard: ' + split());
+        $('btn-theme').click();
+        $('sidebar-toggle').click();
+        doc.querySelector('#menu-view-list [data-view="preview"]').click();
+        assert(theme() === 'dark' && collapsed() && view() === 'preview', 'changed before the reload');
+        await boot(true);
+        assert(split() === 22, 'divider after the reload: ' + split());
+        assert(theme() === 'dark', 'theme after the reload: ' + theme());
+        assert(collapsed(), 'sidebar after the reload');
+        assert(view() === 'preview', 'view after the reload: ' + view());
+    });
+
+    h.test('a mouse drag of the divider is back after a reload, at the same share', async () => {
+        doc.querySelector('#menu-view-list [data-view="split"]').click();
+        drag(62);
+        assert(Math.abs(split() - 62) <= 1, 'dragged to ' + split());
+        const share = editorShare();
+        await boot(true);
+        assert(Math.abs(split() - 62) <= 1, 'divider after the reload: ' + split());
+        assert(Math.abs(editorShare() - share) < 1, `editor share ${editorShare().toFixed(1)}%, before ${share.toFixed(1)}%`);
+        assert(view() === 'split', 'view split');
+        assert(Number(localStorage.getItem(KEYS.split)) === Math.round(Number(localStorage.getItem(KEYS.split)) * 10) / 10,
+            'stored to one decimal: ' + localStorage.getItem(KEYS.split));
+    });
+
+    h.test('garbage in every key: the app boots on the defaults', async () => {
+        // A few reloads only (each one boots the editor); the parser's other cases are in the same rule.
+        for (const bad of ['abc', '50; width: 0', '1e2']) {
+            setKeys({split: bad, theme: 'purple', view: 'grid', sidebar: 'yes'});
+            await boot(true);
+            assert(split() === 50 && $('editor-pane').style.width === '', `split ${JSON.stringify(bad)}: ${split()} ${$('editor-pane').style.width}`);
+            if (bad !== 'abc') continue;   // the other keys once is enough
+            assert(view() === 'split', 'view: ' + view());
+            assert(theme() === 'light' || theme() === 'dark', 'theme: ' + theme());
+            assert(!collapsed(), 'sidebar open');
+        }
+    });
+
+    h.test('a stored position outside the limits is clamped, so neither pane can disappear', async () => {
+        for (const [stored, want] of [['95', 80], ['0', 20]]) {
+            setKeys({split: stored});
+            await boot(true);
+            assert(split() === want, `stored ${stored}: ${split()}, want ${want}`);
+            const share = editorShare();
+            assert(share >= 19 && share <= 81, `stored ${stored}: editor share ${share.toFixed(1)}%`);
+            assert($('editor-pane').getBoundingClientRect().width > 100 && $('preview-pane').getBoundingClientRect().width > 100, 'both panes visible');
+        }
+        setKeys({});
+    });
+
+    async function cspOf(url) {
+        const html = await (await fetch(url)).text();
+        const meta = new DOMParser().parseFromString(html, 'text/html').querySelector('meta[http-equiv="Content-Security-Policy"]');
+        return meta && meta.content;
+    }
+
+    h.test('blocked storage: the editor boots on the defaults and every preference still changes', async () => {
+        assert(await cspOf('lib/blocked-storage-frame.html') === await cspOf('../index.html'), 'the frame has the app\'s policy');
+        const r = await new Promise((resolve) => {
+            const onMessage = (ev) => {
+                if (ev.origin !== location.origin || !ev.data || ev.data.frame !== 'blocked-storage') return;
+                window.removeEventListener('message', onMessage);
+                resolve(ev.data);
+            };
+            window.addEventListener('message', onMessage);
+            frame.src = 'lib/blocked-storage-frame.html';
+        });
+        assert(!r.error, 'booted: ' + r.error);
+        assert(r.booted, 'a document loaded and the editor is editable');
+        assert(r.errors.length === 0, 'no errors: ' + r.errors.join('; '));
+        assert(r.split === '50' && r.editorWidth === '', 'divider default: ' + r.split + ' ' + r.editorWidth);
+        assert(r.view === 'split' && !r.sidebarCollapsed, 'view and sidebar defaults');
+        assert(r.theme === 'light' || r.theme === 'dark', 'theme: ' + r.theme);
+        assert(r.splitAfterKey === '52', 'the divider still moves: ' + r.splitAfterKey);
+        assert(r.themeAfterToggle !== r.theme && r.sidebarAfterToggle, 'theme and sidebar still toggle');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

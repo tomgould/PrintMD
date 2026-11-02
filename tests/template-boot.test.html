@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Template boot Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        iframe { width: 1px; height: 1px; border: 0; position: absolute; left: -10px; }
+    </style>
+</head>
+<body>
+<h1>Template boot: the whole editor with a broken layer, and with a broken core manifest</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    import {createHarness, assert} from './lib/harness.js';
+    import {assertFailureBanner, inFrame} from './lib/registry-cases.js';
+
+    const h = createHarness('BOOT');
+    const core = await (await fetch('../templates/manifest.core.json')).json();
+    const CORE_IDS = core.templates.map((t) => t.id);
+
+    h.test('the editor boots with a broken layer: the picker lists the core templates and the preview renders', async () => {
+        const r = await inFrame('malformed', {app: true});
+        assert(!r.error, 'the app booted: ' + r.error);
+        // The picker is alphabetical, the manifest is in its own order: compare the sets.
+        assert(JSON.stringify([...r.options].sort()) === JSON.stringify([...CORE_IDS].sort()), 'picker: ' + r.options);
+        assert(r.previewChars > 50, 'preview text: ' + r.previewChars);
+        assert(r.warns.length === 1 && !/oops/.test(r.warns[0]), 'one console warning, the file not echoed: ' + r.warns);
+        assert(r.violations.length === 0, 'no policy violation: ' + r.violations);
+    });
+
+    h.test('a broken core manifest: the editor says so in a banner and its toolbar is switched off', async () => {
+        const r = await inFrame('coreBroken', {app: true});
+        assert(/manifest\.core\.json: is not valid JSON/.test(r.error), 'the app did not start: ' + r.error);
+        assertFailureBanner(r, 'editor');
+        assert(r.controls > 10 && r.disabled === r.controls, `every toolbar control disabled: ${r.disabled} of ${r.controls}`);
+        assert(!r.errors[0].includes('oops'), 'the file is not echoed');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

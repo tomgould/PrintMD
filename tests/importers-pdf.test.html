@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF Importer Fixture Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>PDF importer fixtures: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+
+<!-- Same markup as index.html's #password-modal -->
+<div class="app-modal" hidden id="password-modal" role="dialog">
+    <div class="app-modal-backdrop" data-role="backdrop"></div>
+    <div class="app-modal-panel">
+        <h2>Password-protected PDF</h2>
+        <p data-role="message"></p>
+        <input autocomplete="off" data-role="password" type="password">
+        <div>
+            <button data-choice="cancel" type="button">Cancel</button>
+            <button data-choice="ok" type="button">Open PDF</button>
+        </div>
+    </div>
+</div>
+<button id="before-dialog" type="button">focus me first</button>
+<div id="preview-sandbox"></div>
+
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+    // Namespace imports: a missing export fails one test, not the whole page.
+    import * as pdfImport from '../js/pdf-import.js';
+    import * as passwordDialog from '../js/password-dialog.js';
+    import * as md from '../js/markdown.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTERS_PDF');
+    md.configureMarked();
+
+    /**
+     * Render Markdown as the preview does, in a live container. Checks there is
+     * no image, no link whose text hides its target and no request to the canary
+     * hosts, and returns the rendered text.
+     */
+    async function renderInert(markdown, label) {
+        const box = document.getElementById('preview-sandbox');
+        box.innerHTML = md.renderMarkdown(markdown);
+        try {
+            const imgs = [...box.querySelectorAll('img')].map(i => i.getAttribute('src'));
+            assert(imgs.length === 0, `${label}: live image(s) ${imgs.join(', ')}`);
+            // A bare URL in text may autolink (its text is its target); a link that shows other text may not.
+            for (const a of box.querySelectorAll('a')) {
+                assert(a.textContent === decodeURI(a.getAttribute('href')), `${label}: hidden link ${a.outerHTML}`);
+            }
+            await new Promise(r => setTimeout(r, 200));
+            const hits = performance.getEntriesByType('resource').map(e => e.name).filter(n => /canary\.example|evil\.example/.test(n));
+            assert(hits.length === 0, `${label}: requested ${hits.join(', ')}`);
+            return box.textContent.replace(/\s+/g, ' ');
+        } finally {
+            box.textContent = '';
+        }
+    }
+
+    for (const name of ['inject-tagged.pdf', 'inject-untagged.pdf']) {
+        h.test(`${name}: Markdown syntax in PDF text stays text, prose reads the same`, async () => {
+            const out = await expectFixture(name, name.replace(/\.pdf$/, '.md'));
+            const text = await renderInert(out, name);
+            for (const want of ['![p](https://canary.example/pdf-para-beacon.png)', '[click]', '(https://evil.example/pdf-link)',
+                '![c](https://canary.example/pdf-cell-', '<img', 'Item ![l](https://canary.example/pdf-li-beacon.png)',
+                'A real parenthesis (like this), maths 2 * 3 = 6, and the file my_report_v2.pdf.', '# not a heading',
+                'Back\\slash and `tick` text.']) {
+                assert(text.includes(want), `${name}: rendered text lacks ${JSON.stringify(want)}: ${text}`);
+            }
+            const box = document.getElementById('preview-sandbox');
+            box.innerHTML = md.renderMarkdown(out);
+            const headings = [...box.querySelectorAll('h1, h2, h3')].map(x => x.textContent);
+            const codes = box.querySelectorAll('code').length;
+            box.textContent = '';
+            assert(JSON.stringify(headings) === '["Report"]', 'headings ' + JSON.stringify(headings));
+            assert(codes === 0, 'PDF text became inline code');
+        });
+    }
+
+    const fixture = async (name) => new File([await (await fetch('fixtures/' + name)).blob()], name, {type: 'application/pdf'});
+    const expected = async (name) => (await (await fetch('fixtures/expected/' + name)).text()).replace(/\r\n?/g, '\n').replace(/\n$/, '');
+    const normalise = (s) => String(s).replace(/\r\n?/g, '\n');
+
+    /** First differing line, so a failure says where the output went wrong. */
+    function firstDiff(got, want) {
+        const a = got.split('\n');
+        const b = want.split('\n');
+        for (let i = 0; i < Math.max(a.length, b.length); i++) {
+            if (a[i] !== b[i]) return `line ${i + 1}: got ${JSON.stringify(a[i])}, want ${JSON.stringify(b[i])}`;
+        }
+        return 'identical';
+    }
+
+    async function expectFixture(pdfName, mdName) {
+        const got = normalise(await pdfImport.pdfToMarkdown(await fixture(pdfName)));
+        const want = await expected(mdName);
+        assert(got === want, `${pdfName} differs from expected/${mdName}: ${firstDiff(got, want)}`);
+        return got;
+    }
+
+    /** An untagged PDF: one array of text lines per page (the first line of each page at 24pt). */
+    function makePdf(pages, extraStream = '') {
+        const esc = (s) => s.replace(/[\\()]/g, '\\$&');
+        const objs = ['<< /Type /Catalog /Pages 2 0 R >>', null, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+        const kids = [];
+        for (const lines of pages) {
+            const stream = lines.map((t, i) => `BT /F1 ${i === 0 ? 24 : 12} Tf 72 ${720 - i * 30} Td (${esc(t)}) Tj ET`).join('\n') + extraStream;
+            objs.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+            objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${objs.length} 0 R /Resources << /Font << /F1 3 0 R >> >> >>`);
+            kids.push(`${objs.length} 0 R`);
+        }
+        objs[1] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${kids.length} >>`;
+        return serialise(objs, '/Root 1 0 R');
+    }
+
+    function serialise(objs, trailer) {
+        let out = '%PDF-1.4\n';
+        const offs = [];
+        objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+        const xref = out.length;
+        out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+        out += `trailer\n<< /Size ${objs.length + 1} ${trailer} >>\nstartxref\n${xref}\n%%EOF\n`;
+        return new File([out], 'built.pdf', {type: 'application/pdf'});
+    }
+
+    /** A tagged PDF whose only structure element (an H1) points at marked content that is not on the page. */
+    function makeTaggedButEmptyPdf() {
+        const stream = ['BT /F1 24 Tf 72 720 Td (Fallback Title) Tj ET', 'BT /F1 12 Tf 72 690 Td (Body text outside the structure tree.) Tj ET',
+            'BT /F1 12 Tf 72 670 Td (A second line of body text.) Tj ET', 'BT /F1 12 Tf 72 650 Td (And a third.) Tj ET'].join('\n');
+        return serialise([
+            '<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 6 0 R >>',
+            '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /StructParents 0 /Resources << /Font << /F1 5 0 R >> >> >>',
+            `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+            '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+            '<< /Type /StructTreeRoot /K [7 0 R] /ParentTree 8 0 R >>',
+            '<< /Type /StructElem /S /H1 /P 6 0 R /Pg 3 0 R /K 0 >>',
+            '<< /Nums [0 [7 0 R]] >>',
+        ], '/Root 1 0 R');
+    }
+
+    /** The real pdf.js, wrapped to record the loading task and every page.cleanup(). */
+    async function spyingPdfJs() {
+        await pdfImport.pdfToMarkdown(makePdf([['Warm up', 'loads pdf.js and sets its worker']]));
+        const lib = await import('../vendor/pdfjs/pdf.min.mjs');
+        const spy = {task: null, cleaned: 0, pages: 0};
+        spy.lib = {...lib, getDocument(params) {
+            const task = lib.getDocument(params);
+            spy.task = task;
+            task.promise.then((pdf) => {
+                spy.pages = pdf.numPages;
+                const getPage = pdf.getPage.bind(pdf);
+                pdf.getPage = async (n) => {
+                    const page = await getPage(n);
+                    const cleanup = page.cleanup.bind(page);
+                    page.cleanup = (...a) => { spy.cleaned++; return cleanup(...a); };
+                    return page;
+                };
+            }, () => {});
+            return task;
+        }};
+        return spy;
+    }
+
+    // Hostile-input growth checks (with the app's built-ins) are in importers-fuzz.test.html.
+
+    // ── Fixtures: exact Markdown ─────────────────────────────────────────────
+    h.test('code-listing.pdf (untagged, 4 pages): headers/footers gone, code intact across pages', async () => {
+        const md = await expectFixture('code-listing.pdf', 'code-listing.md');
+        assert(!/Inventory Service Code Listing|Page \d of 4/.test(md), 'running header/footer left in: ' + md.slice(0, 200));
+        assert(md.includes('Copyright Example Ltd. All rights reserved.'), 'body text that mentions "All rights reserved" was dropped');
+        assert(!/^## /m.test(md), 'an ALL-CAPS code comment became a heading');
+    });
+
+    h.test('tagged.pdf: Div containers, merged inline runs, bullets, nesting, table, link', async () => {
+        await expectFixture('tagged.pdf', 'tagged.md');
+    });
+
+    h.test('rtl.pdf: Arabic and Hebrew in logical order, separate paragraphs', async () => {
+        const md = await expectFixture('rtl.pdf', 'rtl.md');
+        const arabic = md.split('\n').find(l => /[؀-ۿ]/.test(l)) || '';
+        assert(arabic.startsWith('مرحبا'), 'Arabic does not start with its first word: ' + arabic);
+        assert(!Array.from(md).some(pdfImport.isPresentationForm), 'presentation-form glyphs left in the text');
+    });
+
+    h.test('rtl-tagged.pdf: the tagged path reads Arabic and Hebrew in logical order too', async () => {
+        const md = await expectFixture('rtl-tagged.pdf', 'rtl-tagged.md');
+        assert(!Array.from(md).some(pdfImport.isPresentationForm), 'presentation-form glyphs left in the text');
+    });
+
+    h.test('orderLineItems: a mixed line follows its alignment, then its first strong character', () => {
+        assert(typeof pdfImport.orderLineItems === 'function', 'orderLineItems is not exported');
+        const item = (str, dir, x, width) => ({str, dir, x, width});
+        const text = (items, w) => pdfImport.orderLineItems(items, w).items.map(i => i.str).join('');
+        // "ARABIC: " then an Arabic word (stored visually, one glyph per item), at the left margin of a wide page.
+        const leftAligned = [item('ARABIC:', 'ltr', 63, 50), item(' ', 'ltr', 113, 4), item('ب', 'rtl', 117, 6), item('ا', 'rtl', 123, 6), item('م', 'rtl', 129, 6)];
+        assert(text(leftAligned, 595) === 'ARABIC: ماب', 'left-aligned mixed line: ' + text(leftAligned, 595));
+        // The same glyphs pushed to the right margin: an RTL paragraph ending in a Latin word.
+        const rightAligned = leftAligned.map(i => ({...i, x: i.x + 400}));
+        assert(text(rightAligned, 595) === 'ماب ARABIC:', 'right-aligned mixed line: ' + text(rightAligned, 595));
+        // Only RTL letters: right to left whatever the alignment.
+        assert(text([item('ב', 'rtl', 63, 6), item('א', 'rtl', 69, 6)], 595) === 'אב', 'pure RTL');
+        assert(text([item('b', 'ltr', 70, 6), item('a', 'ltr', 63, 6)], 595) === 'ab', 'LTR sorted by x');
+    });
+
+    // ── Scanned PDFs ─────────────────────────────────────────────────────────
+    h.test('a PDF with no text layer says so instead of importing an empty doc', async () => {
+        const err = await pdfImport.pdfToMarkdown(makePdf([[]], '0 0 m 300 300 l S')).then(() => null, e => e);
+        assert(err && err.message.startsWith('No text layer (scanned PDF?)'), 'got ' + (err && err.message));
+        assert(err.message === pdfImport.NO_TEXT_MESSAGE, 'exported message');
+    });
+
+    h.test('a tagged PDF whose tree yields no text falls back to the heuristics', async () => {
+        const md = await pdfImport.pdfToMarkdown(makeTaggedButEmptyPdf());
+        assert(md === '# Fallback Title\n\nBody text outside the structure tree.\n\nA second line of body text.\n\nAnd a third.', 'got ' + JSON.stringify(md));
+    });
+
+    // ── Passwords ────────────────────────────────────────────────────────────
+    h.test('password.pdf: asks, re-asks after a wrong password, then imports', async () => {
+        const reasons = [];
+        const answers = ['wrong-password', 'bright'];
+        const md = await pdfImport.pdfToMarkdown(await fixture('password.pdf'), null, {
+            onPassword: async (reason) => { reasons.push(reason); return answers.shift(); },
+        });
+        assert(JSON.stringify(reasons) === '["need","incorrect"]', 'reasons ' + JSON.stringify(reasons));
+        assert(md === '# Protected Report\n\nThis text is behind a password.\n\nIt opens with the user password.\n\nNothing else is on the page.',
+            'got ' + JSON.stringify(md));
+    });
+
+    h.test('password.pdf: cancelling the prompt resolves null and frees pdf.js', async () => {
+        const spy = await spyingPdfJs();
+        const reasons = [];
+        const out = await pdfImport.pdfToMarkdown(await fixture('password.pdf'), null, {
+            pdfjsLib: spy.lib, onPassword: async (reason) => { reasons.push(reason); return null; },
+        });
+        assert(out === null, 'expected null, got ' + JSON.stringify(out));
+        assert(JSON.stringify(reasons) === '["need"]', 'asked ' + JSON.stringify(reasons));
+        assert(spy.task && spy.task.destroyed === true, 'loading task not destroyed');
+    });
+
+    h.test('password.pdf without a password handler fails with a clear message', async () => {
+        const err = await pdfImport.pdfToMarkdown(await fixture('password.pdf')).then(() => null, e => e);
+        assert(err && /password-protected/.test(err.message), 'got ' + (err && err.message));
+    });
+
+    // ── Large files ──────────────────────────────────────────────────────────
+    const bigPages = () => Array.from({length: pdfImport.LARGE_PDF_PAGES + 1}, (_, i) => [`Section ${i + 1}`, 'Short body line.']);
+
+    h.test(`more than ${pdfImport.LARGE_PDF_PAGES} pages: asks first, and "no" cancels`, async () => {
+        const spy = await spyingPdfJs();
+        const asked = [];
+        const out = await pdfImport.pdfToMarkdown(makePdf(bigPages()), null, {
+            pdfjsLib: spy.lib, onConfirm: async (message) => { asked.push(message); return false; },
+        });
+        assert(out === null, 'expected null, got ' + typeof out);
+        assert(asked.length === 1 && asked[0].includes(`${pdfImport.LARGE_PDF_PAGES + 1} pages`), 'asked ' + JSON.stringify(asked));
+        assert(spy.task.destroyed === true && spy.cleaned === 0, `destroyed ${spy.task.destroyed}, pages read ${spy.cleaned}`);
+    });
+
+    h.test('a PDF under the page limit is not asked about', async () => {
+        let asked = 0;
+        const md = await pdfImport.pdfToMarkdown(makePdf([['Small', 'body']]), null, {onConfirm: async () => { asked++; return false; }});
+        assert(asked === 0 && /Small/.test(md), `asked ${asked}, got ${md}`);
+    });
+
+    // ── Resources ────────────────────────────────────────────────────────────
+    h.test('every page is cleaned up and the loading task destroyed after an import', async () => {
+        const spy = await spyingPdfJs();
+        await pdfImport.pdfToMarkdown(await fixture('code-listing.pdf'), null, {pdfjsLib: spy.lib});
+        assert(spy.pages === 4, 'pages ' + spy.pages);
+        assert(spy.cleaned >= 4, 'page.cleanup() calls: ' + spy.cleaned);
+        assert(spy.task.destroyed === true, 'loading task not destroyed');
+    });
+
+    h.test('a failed import destroys the loading task too', async () => {
+        const spy = await spyingPdfJs();
+        await pdfImport.pdfToMarkdown(makePdf([[]]), null, {pdfjsLib: spy.lib}).catch(() => {});
+        assert(spy.task.destroyed === true, 'loading task not destroyed');
+    });
+
+    // ── Password dialog ──────────────────────────────────────────────────────
+    const root = document.getElementById('password-modal');
+    const input = root.querySelector('[data-role="password"]');
+    const key = (k, opts = {}) => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true, ...opts}));
+
+    h.test('password dialog: Enter submits, the field is cleared, focus returns', async () => {
+        const ask = passwordDialog.createPasswordDialog(root);
+        const before = document.getElementById('before-dialog');
+        before.focus();
+        const answer = ask('need');
+        assert(!root.hidden && document.activeElement === input, 'shown with the field focused');
+        assert(/protected with a password/.test(root.querySelector('[data-role="message"]').textContent), 'need message');
+        input.value = 's3cret';
+        key('Enter');
+        assert(await answer === 's3cret', 'resolved with the password');
+        assert(root.hidden && input.value === '', 'hidden and cleared');
+        assert(document.activeElement === before, 'focus restored');
+    });
+
+    h.test('password dialog: Escape and Cancel resolve null; "incorrect" says so', async () => {
+        const ask = passwordDialog.createPasswordDialog(root);
+        const first = ask('incorrect');
+        assert(/did not open/.test(root.querySelector('[data-role="message"]').textContent), 'incorrect message');
+        input.value = 'typed';
+        key('Escape');
+        assert(await first === null, 'Escape gives null');
+        const second = ask();
+        root.querySelector('[data-choice="cancel"]').click();
+        assert(await second === null && input.value === '', 'Cancel gives null and clears');
+        const third = ask();
+        input.value = 'pw';
+        root.querySelector('[data-choice="ok"]').click();
+        assert(await third === 'pw', 'Open PDF button submits');
+    });
+
+    h.test('password dialog: Tab stays inside the dialog', async () => {
+        const ask = passwordDialog.createPasswordDialog(root);
+        const answer = ask();
+        const order = [];
+        for (let i = 0; i < 4; i++) {
+            key('Tab');
+            order.push(document.activeElement.dataset.choice || document.activeElement.dataset.role);
+        }
+        key('Escape');
+        await answer;
+        assert(JSON.stringify(order) === '["cancel","ok","password","cancel"]', 'focus order ' + JSON.stringify(order));
+    });
+
+    h.run();
+</script>
+</body>
+</html>

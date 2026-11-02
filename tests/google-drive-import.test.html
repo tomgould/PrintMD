@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>google-drive-import.js Tests</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background: #fafafa;
+        }
+
+        h1 {
+            font-size: 1.3rem;
+            margin-bottom: 4px;
+        }
+
+        .summary {
+            font-size: 0.9rem;
+            color: #555;
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+
+        th {
+            text-align: left;
+            padding: 8px 12px;
+            background: #333;
+            color: #fff;
+        }
+
+        td {
+            padding: 7px 12px;
+            border-bottom: 1px solid #e8e8e8;
+        }
+
+        tr.pass td:first-child::before {
+            content: "✓ ";
+            color: #22a663;
+            font-weight: 700;
+        }
+
+        tr.fail td:first-child::before {
+            content: "✗ ";
+            color: #cc2222;
+            font-weight: 700;
+        }
+
+        tr.pass {
+            background: #f0fff4;
+        }
+
+        tr.fail {
+            background: #fff0f0;
+        }
+
+        .detail {
+            color: #666;
+            font-size: 0.8rem;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+<h1>google-drive-import.js unit tests</h1>
+<p class="summary" id="summary">Running…</p>
+<table>
+    <thead>
+    <tr>
+        <th>Test</th>
+        <th>Expected</th>
+        <th>Detail</th>
+    </tr>
+    </thead>
+    <tbody id="results"></tbody>
+</table>
+
+<script type="module">
+    import * as drive from '../js/google-drive-import.js';
+    const {parseGoogleUrl} = drive;
+
+    const results = [];
+
+    function test(name, fn) {
+        try {
+            const ok = fn();
+            results.push({name, pass: ok, detail: ''});
+        } catch (e) {
+            results.push({name, pass: false, detail: e.message});
+        }
+    }
+
+    // ── parseGoogleUrl tests ───────────────────────────────────────────────────
+    test('Doc URL: standard edit link', () => {
+        const r = parseGoogleUrl('https://docs.google.com/document/d/1abc123XYZ/edit');
+        return r?.id === '1abc123XYZ' && r?.kind === 'doc';
+    });
+    test('Doc URL: with heading anchor', () => {
+        const r = parseGoogleUrl('https://docs.google.com/document/d/1gngqzhUQC450QSQvqKTnCT2utLWy0520ogzrHI4uJ94/edit?tab=t.0#heading=h.t3oakq9a4o8i');
+        return r?.id === '1gngqzhUQC450QSQvqKTnCT2utLWy0520ogzrHI4uJ94' && r?.kind === 'doc';
+    });
+    test('Sheet URL', () => {
+        const r = parseGoogleUrl('https://docs.google.com/spreadsheets/d/1SHEET_ID_here/edit#gid=0');
+        return r?.id === '1SHEET_ID_here' && r?.kind === 'sheet';
+    });
+    test('Drive file/d/ URL', () => {
+        const r = parseGoogleUrl('https://drive.google.com/file/d/1FILEID_abcdef/view?usp=sharing');
+        return r?.id === '1FILEID_abcdef' && r?.kind === 'file';
+    });
+    test('Drive open?id= URL', () => {
+        const r = parseGoogleUrl('https://drive.google.com/open?id=1OPENID-abcdef');
+        return r?.id === '1OPENID-abcdef' && r?.kind === 'file';
+    });
+    test('Non-Google URL returns null', () => {
+        return parseGoogleUrl('https://example.com/doc') === null;
+    });
+    test('Empty string returns null', () => {
+        return parseGoogleUrl('') === null;
+    });
+    test('Garbage string returns null', () => {
+        return parseGoogleUrl('not a url at all!!!') === null;
+    });
+
+    // ── parseGoogleUrl: hostile and unsupported input ─────────────────────────
+    const ID = '1AbCdEfGhIjKlMnOp_-q';
+    test('open?id= on a non-Google host is rejected', () =>
+        parseGoogleUrl(`https://evil.example.com/open?id=${ID}`) === null);
+    test('/document/d/ on a non-Google host is rejected', () =>
+        parseGoogleUrl(`https://evil.example.com/document/d/${ID}/edit`) === null &&
+        parseGoogleUrl(`https://docs.google.com.evil.example.com/document/d/${ID}/edit`) === null &&
+        parseGoogleUrl(`https://evil.example.com/file/d/${ID}/view`) === null);
+    test('http:// Google URL is rejected', () =>
+        parseGoogleUrl(`http://docs.google.com/document/d/${ID}/edit`) === null);
+    test('userinfo or port on a Google host is rejected', () =>
+        parseGoogleUrl(`https://docs.google.com@evil.example.com/document/d/${ID}/edit`) === null &&
+        parseGoogleUrl(`https://drive.google.com:8443/open?id=${ID}`) === null);
+    test('bad ids are rejected', () =>
+        ['short', '../../x', 'a%2Fb%2Fcdefghij', 'abcdefghij?x=1', 'abc def ghij', '<script>abc', ''].every(bad =>
+            parseGoogleUrl(`https://drive.google.com/open?id=${encodeURIComponent(bad)}`) === null));
+    test('id with path traversal in open?id= is rejected', () =>
+        parseGoogleUrl('https://drive.google.com/open?id=../../drive/v3/about') === null);
+    test('/u/N/ account paths parse', () => {
+        const doc = parseGoogleUrl(`https://docs.google.com/document/u/1/d/${ID}/edit`);
+        const sheet = parseGoogleUrl(`https://docs.google.com/spreadsheets/u/0/d/${ID}/edit#gid=0`);
+        const file = parseGoogleUrl(`https://drive.google.com/file/u/2/d/${ID}/view`);
+        const open = parseGoogleUrl(`https://drive.google.com/u/0/open?id=${ID}`);
+        return doc?.kind === 'doc' && doc.id === ID && sheet?.kind === 'sheet' && file?.kind === 'file' && open?.id === ID;
+    });
+    test('folder links and odd account paths are still rejected', () =>
+        parseGoogleUrl(`https://drive.google.com/drive/u/0/folders/x?id=${ID}#`) === null &&
+        parseGoogleUrl(`https://docs.google.com/document/u/x/d/${ID}/edit`) === null &&
+        parseGoogleUrl(`https://drive.google.com/document/d/${ID}/edit`) === null);
+    test('a Google host with an unrelated path but an id= query is rejected', () =>
+        parseGoogleUrl(`https://docs.google.com/forms/x?id=${ID}`) === null);
+    test('accepted ids match the safe pattern', () => {
+        const r = parseGoogleUrl(`https://drive.google.com/open?id=${ID}`);
+        return r?.id === ID && /^[A-Za-z0-9_-]{10,}$/.test(r.id);
+    });
+
+    // ── OAuth flow (stubbed Google libraries) ──────────────────────────────────
+    // Mark the Google scripts as loaded without fetching them (type=text/plain).
+    for (const src of ['https://accounts.google.com/gsi/client', 'https://apis.google.com/js/api.js']) {
+        const tag = document.createElement('script');
+        tag.type = 'text/plain';
+        tag.setAttribute('src', src);
+        document.head.appendChild(tag);
+    }
+    const auth = {configs: [], revoked: [], onRequest: () => {}};
+    window.google = {
+        accounts: {oauth2: {
+            initTokenClient(cfg) { auth.configs.push(cfg); return {requestAccessToken() { auth.onRequest(cfg); }}; },
+            revoke(token, cb) { auth.revoked.push(token); if (cb) cb(); },
+        }},
+        picker: {
+            Action: {PICKED: 'picked', CANCEL: 'cancel'},
+            DocsView: class { setIncludeFolders() { return this; } setMimeTypes() { return this; } },
+            PickerBuilder: class {
+                addView() { return this; } setOAuthToken() { return this; } setDeveloperKey() { return this; }
+                setTitle() { return this; } setCallback(cb) { this.cb = cb; return this; }
+                build() { const cb = this.cb; return {setVisible() { setTimeout(() => cb({action: 'cancel'}), 0); }}; }
+            },
+        },
+    };
+    window.gapi = {load(_lib, opts) { opts.callback(); }};
+    localStorage.setItem('gd-client-id', 'dummy-client.apps.googleusercontent.com');
+    localStorage.setItem('gd-api-key', 'dummy-api-key');
+
+    async function atest(name, fn) {
+        auth.configs = []; auth.revoked = []; auth.onRequest = () => {};
+        try {
+            // A hung flow fails this test instead of hanging the page.
+            const ok = await Promise.race([fn(), new Promise((_, rej) => setTimeout(() => rej(new Error('test hung for 8s')), 8000))]);
+            results.push({name, pass: ok === true, detail: ok === true ? '' : String(ok)});
+        } catch (e) {
+            results.push({name, pass: false, detail: e.message});
+        }
+    }
+    const fileUrl = `https://drive.google.com/file/d/${ID}/view`;
+
+    await atest('closed sign-in popup rejects with a clear message (error_callback)', async () => {
+        auth.onRequest = (cfg) => cfg.error_callback ? cfg.error_callback({type: 'popup_closed'}) : null;
+        const err = await drive.importFromUrl(fileUrl, {authTimeoutMs: 2000}).then(() => null, e => e);
+        return !!err && /closed|cancel/i.test(err.message) || ('got ' + (err && err.message));
+    });
+    await atest('a sign-in that never finishes times out', async () => {
+        const err = await drive.importFromUrl(fileUrl, {authTimeoutMs: 100}).then(() => null, e => e);
+        return !!err && /timed out/i.test(err.message) || ('got ' + (err && err.message));
+    });
+    await atest('a token that arrives after the timeout is revoked at once', async () => {
+        let cfgSeen = null;
+        auth.onRequest = (cfg) => { cfgSeen = cfg; };
+        const err = await drive.importFromUrl(fileUrl, {authTimeoutMs: 50}).then(() => null, e => e);
+        if (!err || !cfgSeen) return 'expected a timeout, got ' + (err && err.message);
+        cfgSeen.callback({access_token: 'tok-late'});
+        return auth.revoked.includes('tok-late') || ('revoked=' + auth.revoked);
+    });
+    await atest('Picker asks for the drive.file scope and revokes the token', async () => {
+        auth.onRequest = (cfg) => cfg.callback({access_token: 'tok-picker'});
+        const out = await drive.importFromPicker({}, null);
+        const scope = auth.configs[0] && auth.configs[0].scope;
+        return (out === null && scope === 'https://www.googleapis.com/auth/drive.file' && auth.revoked.includes('tok-picker'))
+            || `out=${out} scope=${scope} revoked=${auth.revoked}`;
+    });
+    await atest('URL import encodes the id, revokes the token on success', async () => {
+        auth.onRequest = (cfg) => cfg.callback({access_token: 'tok-url'});
+        const fetched = [];
+        const realFetch = window.fetch;
+        window.fetch = async (url) => {
+            fetched.push(String(url));
+            if (String(url).includes('fields=mimeType')) return new Response(JSON.stringify({mimeType: 'text/plain'}));
+            return new Response('hello from drive');
+        };
+        try {
+            const out = await drive.importFromUrl(fileUrl, {authTimeoutMs: 2000});
+            return (out === 'hello from drive' && fetched.every(u => u.includes(`/files/${encodeURIComponent(ID)}`)) &&
+                auth.revoked.includes('tok-url') && auth.configs[0].scope.endsWith('/drive.readonly')) ||
+                `out=${out} fetched=${fetched} revoked=${auth.revoked}`;
+        } finally {
+            window.fetch = realFetch;
+        }
+    });
+    await atest('URL import revokes the token when the download fails', async () => {
+        auth.onRequest = (cfg) => cfg.callback({access_token: 'tok-fail'});
+        const realFetch = window.fetch;
+        window.fetch = async () => new Response('nope', {status: 404});
+        try {
+            const err = await drive.importFromUrl(fileUrl, {authTimeoutMs: 2000}).then(() => null, e => e);
+            return (!!err && auth.revoked.includes('tok-fail')) || `err=${err} revoked=${auth.revoked}`;
+        } finally {
+            window.fetch = realFetch;
+        }
+    });
+
+    // ── Conversion by type (stubbed fetch: real Google is not reachable from tests) ──
+    const docUrl = `https://docs.google.com/document/d/${ID}/edit`;
+    const sheetUrl = `https://docs.google.com/spreadsheets/d/${ID}/edit#gid=0`;
+    const DOC_HTML = '<html><head><title>Plan</title><style>.c1{font-weight:700}</style></head><body class="doc-content">' +
+        '<h1 id="h.1"><span>Plan</span></h1><p><span>Intro with </span>' +
+        '<a href="https://www.google.com/url?q=https://example.com/a&amp;sa=D&amp;ust=1">a link</a></p>' +
+        '<ul><li>One</li><li>Two</li></ul><h2>Next</h2></body></html>';
+    const DOC_MD = '# Plan\n\nIntro with [a link](https://example.com/a)\n\n-   One\n-   Two\n\n## Next';
+    async function withFetch(handler, fn) {
+        const realFetch = window.fetch;
+        const calls = [];
+        window.fetch = async (url, init = {}) => {
+            calls.push({url: String(url), auth: (init.headers || {}).Authorization || null});
+            return handler(String(url), init);
+        };
+        try {
+            return await fn(calls);
+        } finally {
+            window.fetch = realFetch;
+        }
+    }
+
+    await atest('a public Doc exports as HTML and keeps headings, lists and links (no sign-in)', () =>
+        withFetch(() => new Response(DOC_HTML, {headers: {'content-type': 'text/html'}}), async (calls) => {
+            const out = await drive.importFromUrl(docUrl, {authTimeoutMs: 2000});
+            return (out === DOC_MD && calls.length === 1 &&
+                calls[0].url === `https://docs.google.com/document/d/${ID}/export?format=html` && auth.configs.length === 0) ||
+                JSON.stringify({out, calls});
+        }));
+
+    await atest('a public Sheet exports as CSV and becomes a Markdown table', () =>
+        withFetch(() => new Response('Name,Qty,Note\r\nApple,3,"red, crisp"\r\n"Pipe | cell",1,"multi\nline ""q"""\r\n,,\r\n'), async (calls) => {
+            const out = await drive.importFromUrl(sheetUrl, {authTimeoutMs: 2000});
+            const want = '| Name | Qty | Note |\n| --- | --- | --- |\n| Apple | 3 | red, crisp |\n| Pipe \\| cell | 1 | multi line "q" |';
+            return (out === want && calls[0].url === `https://docs.google.com/spreadsheets/d/${ID}/export?format=csv`) ||
+                JSON.stringify({out, calls});
+        }));
+
+    await atest('a CORS failure on the public export falls through to OAuth, using opts.clientId', async () => {
+        localStorage.removeItem('gd-client-id');
+        auth.onRequest = (cfg) => cfg.callback({access_token: 'tok-cors'});
+        try {
+            return await withFetch((url) => {
+                if (url.startsWith('https://docs.google.com/')) throw new TypeError('Failed to fetch');
+                return new Response(DOC_HTML);
+            }, async (calls) => {
+                const out = await drive.importFromUrl(docUrl, {clientId: 'opts-client.apps.googleusercontent.com', authTimeoutMs: 2000});
+                const api = calls[1] || {};
+                return (out === DOC_MD && auth.configs[0]?.client_id === 'opts-client.apps.googleusercontent.com' &&
+                    api.url === `https://www.googleapis.com/drive/v3/files/${ID}/export?mimeType=text%2Fhtml` &&
+                    api.auth === 'Bearer tok-cors' && auth.revoked.includes('tok-cors')) || JSON.stringify({out, calls, cfg: auth.configs[0]?.client_id});
+            });
+        } finally {
+            localStorage.setItem('gd-client-id', 'dummy-client.apps.googleusercontent.com');
+        }
+    });
+
+    await atest('a redirect to the sign-in page counts as private; with no Client ID the message says so', async () => {
+        localStorage.removeItem('gd-client-id');
+        try {
+            const login = {ok: true, redirected: true, type: 'basic', url: 'https://accounts.google.com/ServiceLogin?continue=x',
+                text: async () => '<html>Sign in</html>'};
+            return await withFetch(() => login, async () => {
+                const err = await drive.importFromUrl(docUrl, {authTimeoutMs: 2000}).then(() => null, e => e);
+                return (!!err && /without signing in/.test(err.message) && /Client ID/.test(err.message) && auth.configs.length === 0) ||
+                    'got ' + (err && err.message);
+            });
+        } finally {
+            localStorage.setItem('gd-client-id', 'dummy-client.apps.googleusercontent.com');
+        }
+    });
+
+    await atest('an unsupported Drive type is refused by name, and the token is revoked', async () => {
+        auth.onRequest = (cfg) => cfg.callback({access_token: 'tok-slides'});
+        return withFetch((url) => new Response(JSON.stringify({mimeType: 'application/vnd.google-apps.presentation'})), async (calls) => {
+            const err = await drive.importFromUrl(fileUrl, {authTimeoutMs: 2000}).then(() => null, e => e);
+            return (!!err && /cannot import Google Slides/.test(err.message) && /Google Docs, Google Sheets, PDF/.test(err.message) &&
+                calls.length === 1 && auth.revoked.includes('tok-slides')) || 'got ' + (err && err.message) + ' calls=' + calls.length;
+        });
+    });
+
+    await atest('a Drive HTML file converts like an HTML import; a CSV file becomes a table', async () => {
+        auth.onRequest = (cfg) => cfg.callback({access_token: 'tok-types'});
+        let type = 'text/html';
+        return withFetch((url) => (url.includes('fields=mimeType') ? new Response(JSON.stringify({mimeType: type}))
+            : new Response(type === 'text/html' ? DOC_HTML : 'a,b\n1,2')), async () => {
+            const html = await drive.importFromUrl(fileUrl, {authTimeoutMs: 2000});
+            type = 'text/csv';
+            const csv = await drive.importFromUrl(fileUrl, {authTimeoutMs: 2000});
+            return (html === DOC_MD && csv === '| a | b |\n| --- | --- |\n| 1 | 2 |') || JSON.stringify({html, csv});
+        });
+    });
+
+    test('parseCsv: quotes, doubled quotes, CRLF and embedded newlines', () =>
+        JSON.stringify(drive.parseCsv(String.fromCharCode(0xfeff) + 'a,"b,c","d""e"\r\n"x\ny",,z')) === JSON.stringify([['a', 'b,c', 'd"e'], ['x\ny', '', 'z']]));
+
+    // ── Clear saved credentials (app dialog) ───────────────────────────────────
+    await atest('the Drive dialog can clear saved Google credentials', async () => {
+        const frame = document.createElement('iframe');
+        frame.style.cssText = 'width:1200px;height:700px;border:0';
+        document.body.appendChild(frame);
+        frame.src = '../index.html';
+        await new Promise(res => frame.addEventListener('load', res, {once: true}));
+        const win = frame.contentWindow;
+        const end = Date.now() + 6000;
+        while (!(win.__bd && win.__bd.docManager.currentId != null) && Date.now() < end) await new Promise(r => setTimeout(r, 50));
+        const d = frame.contentDocument;
+        d.getElementById('btn-import-drive').click();
+        d.querySelector('#drive-modal .drive-tab[data-tab="settings"]').click();
+        const clear = d.getElementById('drive-btn-clear-creds');
+        if (!clear) return 'no clear button';
+        clear.click();
+        const ok = localStorage.getItem('gd-client-id') === null && localStorage.getItem('gd-api-key') === null &&
+            d.getElementById('drive-input-client-id').value === '' && d.getElementById('drive-input-api-key').value === '';
+        frame.remove();
+        return ok || 'credentials still present';
+    });
+
+    localStorage.removeItem('gd-client-id');
+    localStorage.removeItem('gd-api-key');
+
+    // ── Render results ─────────────────────────────────────────────────────────
+    const tbody = document.getElementById('results');
+    let pass = 0, fail = 0;
+    for (const r of results) {
+        const tr = document.createElement('tr');
+        tr.className = r.pass ? 'pass' : 'fail';
+        tr.innerHTML = `<td>${r.name}</td><td>${r.pass ? 'pass' : 'FAIL'}</td><td class="detail">${r.detail}</td>`;
+        tbody.appendChild(tr);
+        r.pass ? pass++ : fail++;
+    }
+    const s = document.getElementById('summary');
+    s.textContent = `${pass} passed · ${fail} failed · ${results.length} total`;
+    s.style.color = fail > 0 ? '#cc2222' : '#22a663';
+</script>
+</body>
+</html>

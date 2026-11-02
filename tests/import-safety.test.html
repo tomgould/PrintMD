@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Import Safety Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>Importer output safety tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script>
+    // Hostile fixtures call alert(); a real dialog would hang the headless run.
+    window.__alerts = [];
+    window.alert = (m) => { window.__alerts.push(String(m)); };
+</script>
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script src="../vendor/jszip/jszip.min.js"></script>
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as md from '../js/markdown.js';
+    import * as htmlImport from '../js/html-import.js';
+    import * as epubImport from '../js/epub-import.js';
+    import * as pdfImport from '../js/pdf-import.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    // Dynamic import: a missing module fails its tests, not the whole page.
+    const utils = await import('../js/import-utils.js').catch(() => ({}));
+    const h = createHarness('IMPORTSAFETY');
+    md.configureMarked();
+
+    // marked without the sanitiser: shows what the Markdown itself would produce.
+    // Parsed into an inert <template> so hostile output cannot run in this page.
+    function rawRender(markdown) {
+        const tpl = document.createElement('template');
+        tpl.innerHTML = marked.parse(markdown);
+        return tpl.content;   // stays in the template's inert document
+    }
+
+    const HOSTILE_TEXT = '<img src=x onerror=alert(1)> and <script>alert(2)<\/script>';
+    const HOSTILE_HTML_TEXT = '&lt;img src=x onerror=alert(1)&gt; and &lt;script&gt;alert(2)&lt;/script&gt;';
+
+    // ── Lazy script loading vs. elements that shadow globals ─────────────────
+    // Registered first: Turndown must not be loaded yet when this runs.
+    h.test('loadScript loads a library even when an element shadows its global', async () => {
+        assert(typeof utils.loadScript === 'function', 'loadScript exported');
+        const shadow = document.createElement('div');
+        shadow.id = 'TurndownService';
+        document.body.appendChild(shadow);
+        try {
+            assert(window.TurndownService === shadow, 'precondition: the element shadows the global');
+            await utils.loadScript(new URL('../vendor/turndown/turndown.js', location.href).href,
+                () => typeof window.TurndownService === 'function');
+            assert(typeof window.TurndownService === 'function', 'real TurndownService loaded, got ' + typeof window.TurndownService);
+        } finally {
+            shadow.remove();
+        }
+    });
+
+    // ── Shared Turndown setup ────────────────────────────────────────────────
+    h.test('import-utils exports buildTurndown', async () => {
+        assert(typeof utils.buildTurndown === 'function', 'buildTurndown exported');
+        await htmlImport.htmlToMarkdown('<p>load turndown</p>');
+        const td = utils.buildTurndown();
+        assert(td.turndown('<ul><li>a</li></ul>').trim() === '-   a', 'bullet marker kept: ' + JSON.stringify(td.turndown('<ul><li>a</li></ul>')));
+    });
+
+    h.test('HTML import: text that looks like HTML stays text', async () => {
+        const out = await htmlImport.htmlToMarkdown(`<h1>T</h1><p>${HOSTILE_HTML_TEXT}</p>`);
+        const box = rawRender(out);
+        assert(!box.querySelector('img, script'), 'no raw HTML elements in the Markdown output: ' + out);
+        assert(box.textContent.includes('<img src=x onerror=alert(1)>'), 'text shown literally: ' + box.textContent);
+    });
+
+    h.test('HTML import then preview: an escaped heading stays text', async () => {
+        const out = await htmlImport.htmlToMarkdown('<h1>T</h1><h2>Example: &lt;img src="/beacon?h"&gt;</h2>');
+        const box = document.createElement('template');
+        box.innerHTML = md.renderMarkdown(out);
+        const h2 = box.content.querySelector('h2');
+        assert(!box.content.querySelector('img'), 'no img in the preview: ' + box.innerHTML);
+        assert(h2 && h2.textContent === 'Example: <img src="/beacon?h">', 'heading text: ' + (h2 && h2.textContent));
+    });
+
+    h.test('HTML import: table cell text that looks like HTML stays text', async () => {
+        const out = await htmlImport.htmlToMarkdown(`<h1>T</h1><table><tr><th>h</th></tr><tr><td>${HOSTILE_HTML_TEXT}</td></tr></table>`);
+        assert(!rawRender(out).querySelector('img, script'), 'no raw HTML from table cells: ' + out);
+    });
+
+    h.test('HTML import: Markdown syntax in table cells stays text', async () => {
+        const out = await htmlImport.htmlToMarkdown('<h1>T</h1><table><tr><th>h</th><th>k</th></tr>' +
+            '<tr><td>![x](/beacon)</td><td>[docs](https://example.com) *em* `c` a\\|b</td></tr></table>');
+        const box = rawRender(out);
+        assert(box.querySelector('table'), 'table rendered: ' + out);
+        assert(!box.querySelector('img, em, code'), 'no live image or formatting: ' + out);
+        // A bare URL may autolink (as in any paragraph), but no hidden link destination appears.
+        for (const a of box.querySelectorAll('a')) assert(a.textContent === a.getAttribute('href'), 'hidden link: ' + a.outerHTML);
+        const cells = [...box.querySelectorAll('td')].map(c => c.textContent);
+        assert(cells[0] === '![x](/beacon)', 'cell 1 literal: ' + JSON.stringify(cells[0]));
+        assert(cells[1] === '[docs](https://example.com) *em* `c` a\\|b', 'cell 2 literal: ' + JSON.stringify(cells[1]));
+    });
+
+    h.test('HTML import: links keep only http(s), mailto, relative and #anchor targets', async () => {
+        const out = await htmlImport.htmlToMarkdown('<h1>T</h1><p>' +
+            '<a href="javascript:alert(1)">js</a> <a href="JaVa&#09;script:alert(1)">tab</a> <a href=" javascript:x">sp</a> ' +
+            '<a href="data:text/html,x">dat</a> <a href="vbscript:x">vb</a> <a href="file:///etc/passwd">fil</a> ' +
+            '<a href="https://ok.example/p">ok</a> <a href="/rel/page">rel</a> <a href="#sec">anc</a> <a href="mailto:a@example.com">mail</a></p>');
+        assert(!/javascript|vbscript|data:|file:/i.test(out), 'unsafe link kept: ' + out);
+        for (const word of ['js', 'tab', 'sp', 'dat', 'vb', 'fil']) assert(new RegExp(`\\b${word}\\b`).test(out), 'link text kept: ' + word);
+        for (const want of ['[ok](https://ok.example/p)', '[rel](/rel/page)', '[anc](#sec)', '[mail](mailto:a@example.com)']) {
+            assert(out.includes(want), 'missing ' + want + ' in ' + out);
+        }
+    });
+
+    h.test('HTML import: <https://...> in text stays a clean autolink, no backslash', async () => {
+        const out = await htmlImport.htmlToMarkdown('<h1>T</h1><p>See &lt;https://x.example/path&gt; now</p>');
+        const box = rawRender(out);
+        const a = box.querySelector('a');
+        assert(a && a.getAttribute('href') === 'https://x.example/path', 'href: ' + (a && a.getAttribute('href')) + ' in ' + out);
+        assert(!box.textContent.includes('\\'), 'no visible backslash: ' + box.textContent);
+    });
+
+    h.test('HTML import: "<" inside a bare URL or before a digit is not escaped', async () => {
+        const out = await htmlImport.htmlToMarkdown('<h1>T</h1><p>Go to https://x.example/?a=1&lt;2 and 1 &lt; 2</p>');
+        const box = rawRender(out);
+        assert(!box.textContent.includes('\\'), 'no visible backslash: ' + box.textContent);
+        for (const a of box.querySelectorAll('a')) assert(!/\\|%5C/i.test(a.getAttribute('href')), 'backslash in href: ' + a.getAttribute('href'));
+        assert(box.textContent.includes('1<2') && box.textContent.includes('1 < 2'), 'text kept: ' + box.textContent);
+    });
+
+    h.test('HTML import: tag-like text stays inert, including across text nodes', async () => {
+        for (const html of ['<p>&lt;<span>img src=x onerror=alert(1)</span>&gt;</p>', '<p>a &lt;b and c&gt; d</p>',
+            '<p>&lt;/p&gt;&lt;img src=x&gt;</p>', '<p>&lt;!-- x --&gt; &lt;?php ?&gt;</p>', '<p>&lt;javascript:alert(1)&gt;</p>']) {
+            const out = await htmlImport.htmlToMarkdown('<h1>T</h1>' + html);
+            const box = rawRender(out);
+            assert(!box.querySelector('img, b, span'), 'live HTML from ' + html + ': ' + out);
+            for (const a of box.querySelectorAll('a')) assert(/^https?:|^mailto:/.test(a.getAttribute('href')), 'unsafe autolink: ' + out);
+        }
+    });
+
+    h.test('imports keep tel: links', async () => {
+        const out = await htmlImport.htmlToMarkdown('<h1>T</h1><p><a href="tel:+441234567890">Call us</a></p>');
+        assert(out.includes('[Call us](tel:+441234567890)'), 'HTML import tel link: ' + out);
+        assert(utils.markdownLink('Call', 'tel:+441234567890') === '[Call](<tel:+441234567890>)', 'PDF link helper: ' + utils.markdownLink('Call', 'tel:+441234567890'));
+    });
+
+    h.test('HTML import: URLs with underscores keep a clean href', async () => {
+        const out = await htmlImport.htmlToMarkdown('<h1>T</h1><p>A &lt;http://x.example/a_b&gt; and https://y.example/c_d_e/f*g end</p>');
+        const hrefs = [...rawRender(out).querySelectorAll('a')].map(a => a.getAttribute('href'));
+        assert(hrefs.includes('http://x.example/a_b'), 'autolink href: ' + hrefs + ' from ' + out);
+        assert(hrefs.some(h => h.startsWith('https://y.example/c_d_e')), 'bare URL href: ' + hrefs);
+        assert(hrefs.every(h => !/\\|%5C/i.test(h)), 'backslash in an href: ' + hrefs);
+    });
+
+    h.test('HTML import: a bare URL followed by tag-like text stays inert', async () => {
+        const tag = '&lt;img src="/beacon?url"&gt;';
+        const cases = [
+            `<p>see https://e.example/${tag} now</p>`, `<p>see http://e.example/${tag}</p>`, `<p>see www.e.example/${tag}</p>`,
+            `<table><tr><th>h</th></tr><tr><td>https://e.example/${tag}</td></tr></table>`,
+            `<h2>Head https://e.example/${tag}</h2>`,
+        ];
+        for (const html of cases) {
+            const out = await htmlImport.htmlToMarkdown('<h1>T</h1>' + html);
+            const box = rawRender(out);
+            assert(!box.querySelector('img'), 'live img from ' + html + ': ' + out);
+            const preview = document.createElement('template');
+            preview.innerHTML = md.renderMarkdown(out);
+            assert(!preview.content.querySelector('img'), 'live img in the preview from ' + html);
+        }
+    });
+
+    h.test('HTML import: code containing ``` cannot break out of its fence', async () => {
+        const code = 'before\n```\n<img src=x onerror=alert(1)>\n````\nafter';
+        const esc = code.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        const out = await htmlImport.htmlToMarkdown(`<h1>T</h1><pre><code>${esc}</code></pre><p>tail</p>`);
+        const box = rawRender(out);
+        assert(!box.querySelector('img'), 'no img escaped the fence: ' + out);
+        const pres = box.querySelectorAll('pre');
+        assert(pres.length === 1, 'one code block, got ' + pres.length);
+        assert(pres[0].textContent.trim() === code, 'code preserved: ' + JSON.stringify(pres[0].textContent));
+    });
+
+    h.test('HTML import: language from class name is restricted', async () => {
+        const cases = [
+            ['language-js', 'js'], ['hljs language-python', 'python'], ['language-c++', 'c++'],
+            ['language-objective-c', 'objective-c'], ['language-js```', ''], ['language-<b>', ''],
+            ['language-a"b', ''], ['nothing', ''],
+        ];
+        for (const [cls, want] of cases) {
+            const out = await htmlImport.htmlToMarkdown(`<h1>T</h1><pre><code class='${cls.replace(/'/g, '&#39;')}'>x = 1</code></pre>`);
+            const fence = out.split('\n').find(l => /^`{3,}/.test(l));
+            const lang = fence.replace(/^`+/, '');
+            assert(lang === want, `${cls} -> ${JSON.stringify(lang)} (want ${JSON.stringify(want)})`);
+        }
+    });
+
+    h.test('fence helper: one backtick longer than the longest run inside', () => {
+        assert(typeof utils.codeFence === 'function', 'codeFence exported');
+        assert(utils.codeFence('plain') === '```', 'default fence');
+        assert(utils.codeFence('a ``` b') === '````', 'longer than ```');
+        assert(utils.codeFence('`````') === '``````', 'longer than 5');
+    });
+
+    // ── EPUB uses the shared setup ───────────────────────────────────────────
+    h.test('EPUB import: HTML-looking text and fence breakouts stay inert', async () => {
+        const zip = new JSZip();
+        zip.file('mimetype', 'application/epub+zip');
+        zip.file('META-INF/container.xml', '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>');
+        zip.file('OEBPS/content.opf', '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Book</dc:title></metadata><manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>');
+        zip.file('OEBPS/c1.xhtml', '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Chapter</h1>' +
+            `<p>${HOSTILE_HTML_TEXT}</p><pre><code class="language-x&quot;y">a\n\`\`\`\n&lt;img src=x onerror=alert(3)&gt;</code></pre></body></html>`);
+        const blob = await zip.generateAsync({type: 'blob'});
+        const out = await epubImport.epubToMarkdown(new File([blob], 'book.epub'));
+        const box = rawRender(out);
+        assert(!box.querySelector('img, script'), 'no raw HTML: ' + out);
+        assert(box.querySelectorAll('pre').length === 1, 'fence held');
+        assert(!/^`{3,}x/m.test(out), 'bad language dropped: ' + out);
+    });
+
+    // ── Links (PDF importer) ─────────────────────────────────────────────────
+    h.test('safe link helper allows only http(s) and mailto, in <url> form', () => {
+        assert(typeof utils.markdownLink === 'function', 'markdownLink exported');
+        assert(utils.markdownLink('site', 'https://example.com/a') === '[site](<https://example.com/a>)', utils.markdownLink('site', 'https://example.com/a'));
+        assert(utils.markdownLink('mail', 'mailto:a@example.com') === '[mail](<mailto:a@example.com>)', 'mailto');
+        for (const bad of ['javascript:alert(1)', 'JAVASCRIPT:alert(1)', 'data:text/html,x', 'vbscript:x', 'file:///etc/passwd', '', null, '/relative']) {
+            assert(utils.markdownLink('t', bad) === 't', 'rejected: ' + bad);
+        }
+    });
+
+    h.test('a hostile URL cannot break out of the Markdown link', () => {
+        const out = utils.markdownLink('click', 'https://example.com/a b)<img src=x onerror=alert(1)>[x](javascript:alert(2))');
+        const box = rawRender(out);
+        const links = box.querySelectorAll('a');
+        assert(links.length === 1, 'one link: ' + out);
+        assert(!box.querySelector('img'), 'no img: ' + out);
+        assert(links[0].getAttribute('href').startsWith('https://example.com/'), 'href stays on the host: ' + links[0].getAttribute('href'));
+        const t = utils.markdownLink('a](javascript:alert(1)) <b>x</b> [', 'https://example.com');
+        const tb = rawRender(t);
+        assert(tb.querySelectorAll('a').length === 1 && !tb.querySelector('b'), 'link text cannot close the link: ' + t);
+        assert(tb.querySelector('a').getAttribute('href') === 'https://example.com', 'href kept');
+    });
+
+    // ── PDF import ───────────────────────────────────────────────────────────
+    h.test('pdf.js is called with isEvalSupported: false', async () => {
+        let params = null;
+        const stub = {getDocument(p) { params = p; return {promise: Promise.reject(new Error('stop'))}; }};
+        await pdfImport.pdfToMarkdown(new File([new Uint8Array([1, 2, 3])], 'x.pdf'), null, {pdfjsLib: stub}).catch(() => {});
+        assert(params, 'getDocument called');
+        assert(params.isEvalSupported === false, 'isEvalSupported false, got ' + params.isEvalSupported);
+        assert(pdfImport.documentParams(new Uint8Array(1)).isEvalSupported === false, 'documentParams sets isEvalSupported: false');
+    });
+
+    h.test('loadScript: a failed load removes its tag, and a retry requests the file again', async () => {
+        const src = new URL('./fixtures/does-not-exist.js?' + Date.now(), location.href).href;
+        const tags = () => [...document.querySelectorAll('script')].filter(s => s.src === src).length;
+        const first = await utils.loadScript(src, () => false).then(() => null, e => e);
+        assert(first && /Failed to load/.test(first.message), 'first load fails: ' + (first && first.message));
+        assert(tags() === 0, 'failed tag removed, found ' + tags());
+        let added = 0;
+        const observer = new MutationObserver((records) => {
+            for (const r of records) for (const n of r.addedNodes) if (n.src === src) added++;
+        });
+        observer.observe(document.head, {childList: true});
+        const second = await utils.loadScript(src, () => false).then(() => null, e => e);
+        observer.disconnect();
+        assert(second && added === 1, `retry requested the file again (added ${added})`);
+        assert(tags() === 0, 'failed retry tag removed too');
+    });
+
+    /** A one-page untagged PDF with the given text lines. */
+    function makePdf(lines) {
+        const esc = (s) => s.replace(/[\\()]/g, '\\$&');
+        const stream = lines.map((t, i) => `BT /F1 ${i === 0 ? 24 : 12} Tf 72 ${720 - i * 30} Td (${esc(t)}) Tj ET`).join('\n');
+        const objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+            `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+        let out = '%PDF-1.4\n';
+        const offs = [];
+        objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+        const xref = out.length;
+        out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+        out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+        return new File([out], 'hostile.pdf', {type: 'application/pdf'});
+    }
+
+    // Registered before any test loads the real pdf.js.
+    h.test('PDF import works when an element shadows window.pdfjsLib', async () => {
+        const shadow = document.createElement('span');
+        shadow.id = 'pdfjsLib';
+        document.body.appendChild(shadow);
+        try {
+            assert(window.pdfjsLib === shadow, 'precondition: the element shadows the global');
+            const out = await pdfImport.pdfToMarkdown(makePdf(['Shadow Title', 'body text']));
+            assert(/Shadow Title/.test(out), 'converted: ' + out);
+            // pdf.js 6 loads as a module: the import never reads window.pdfjsLib, so an element cannot stand in for it.
+        } finally {
+            shadow.remove();
+        }
+    });
+
+    h.test('PDF import: text that looks like HTML stays text', async () => {
+        const out = await pdfImport.pdfToMarkdown(makePdf(['Imported Title', 'Hello ' + HOSTILE_TEXT + ' world']));
+        const box = rawRender(out);
+        assert(!box.querySelector('img, script'), 'no raw HTML in the Markdown: ' + out);
+        assert(box.textContent.includes('<img src=x onerror=alert(1)>'), 'shown as text: ' + box.textContent);
+    });
+
+    h.test('no hostile fixture ran script in this page', async () => {
+        await new Promise(r => setTimeout(r, 300));
+        assert(window.__alerts.length === 0, 'alerts fired: ' + window.__alerts.join(', '));
+    });
+
+    h.run();
+</script>
+</body>
+</html>

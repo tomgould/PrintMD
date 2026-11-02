@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Importer Zip Bomb Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>Word and EPUB zip bombs: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    // Zip bombs whose directory lies (about 210 MB inflated, 1000 bytes declared),
+    // on their own page so no page nears the runner's 30 s limit on a slow CI CPU.
+    import * as utils from '../js/import-utils.js';
+    import * as docx from '../js/docx-import.js';
+    import * as epub from '../js/epub-import.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTERS_BOMBS');
+
+    const fixture = async (name) => new File([await (await fetch('fixtures/' + name)).blob()], name);
+
+    /**
+     * Run an import that should fail; time it (for the message only) and sample the
+     * JS heap growth while it runs. Speed is not asserted: a slower CPU is no fault.
+     * That inflating stops at the cap is checked by bytes (inflatedBytes) below.
+     */
+    async function measureRefusal(run) {
+        const heap = () => (performance.memory ? performance.memory.usedJSHeapSize : 0);
+        const base = heap();
+        let peak = 0;
+        const timer = setInterval(() => { peak = Math.max(peak, heap() - base); }, 10);
+        const t0 = performance.now();
+        try {
+            const err = await run().then(() => null, e => e);
+            peak = Math.max(peak, heap() - base);
+            return {err, ms: Math.round(performance.now() - t0), peakMB: Math.round(peak / 1048576)};
+        } finally {
+            clearInterval(timer);
+        }
+    }
+
+    h.test('bomb-lie.epub: refused while inflating, before any chapter is parsed', async () => {
+        const r = await measureRefusal(async () => epub.epubToMarkdown(await fixture('bomb-lie.epub')));
+        assert(r.err && /This EPUB file expands to more than 200 MB/.test(r.err.message), 'got ' + (r.err && r.err.message) + ` (${r.ms} ms)`);
+        assert(r.peakMB < 150, `JS heap grew by ${r.peakMB} MB`);
+    });
+
+    h.test('bomb-truncated.epub (directory size covers one entry): every entry is still counted', async () => {
+        const r = await measureRefusal(async () => epub.epubToMarkdown(await fixture('bomb-truncated.epub')));
+        assert(r.err && /would expand to 2\d\d MB, over the 200 MB import limit/.test(r.err.message), 'got ' + (r.err && r.err.message));
+        assert(r.peakMB < 150, `${r.ms} ms, heap +${r.peakMB} MB`);
+    });
+
+    h.test('bomb-lie.docx: refused while inflating, and mammoth never runs', async () => {
+        await utils.loadMammoth();
+        const real = window.mammoth.convertToHtml;
+        let calls = 0;
+        window.mammoth.convertToHtml = (...args) => { calls++; return real.apply(window.mammoth, args); };
+        try {
+            const r = await measureRefusal(async () => docx.docxToMarkdown(await fixture('bomb-lie.docx')));
+            assert(r.err && /This Word file expands to more than 200 MB/.test(r.err.message), 'got ' + (r.err && r.err.message));
+            assert(calls === 0, 'mammoth ran ' + calls + ' times');
+            assert(r.peakMB < 150, `${r.ms} ms, heap +${r.peakMB} MB`);
+        } finally {
+            window.mammoth.convertToHtml = real;
+        }
+    });
+
+    h.test('inflating stops as soon as the running total passes the cap', async () => {
+        const JSZip = await utils.loadJSZip();
+        const zip = await JSZip.loadAsync(await (await fixture('bomb-lie.epub')).arrayBuffer());
+        const cap = 20 * 1048576;
+        const err = await utils.assertInflatedWithinLimit(zip, {kind: 'EPUB', maxBytes: cap}).then(() => null, e => e);
+        assert(err && /expands to more than 20 MB/.test(err.message), 'got ' + (err && err.message));
+        assert(err.inflatedBytes > cap && err.inflatedBytes < cap + 2 * 1048576, 'stopped after ' + err.inflatedBytes + ' bytes');
+        const fine = await utils.assertInflatedWithinLimit(await JSZip.loadAsync(await (await fixture('encoded-names.epub')).arrayBuffer()), {kind: 'EPUB'});
+        assert(fine > 1500 && fine < 10000, 'real size of a normal EPUB: ' + fine);
+    });
+
+    h.run();
+</script>
+</body>
+</html>

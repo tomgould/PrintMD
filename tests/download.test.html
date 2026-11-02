@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Download Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>download.js: downloadBlob</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    // Namespace import: a missing export fails that one test, not the whole page.
+    import * as download from '../js/download.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('DOWNLOAD');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    h.test('downloadBlob clicks a download link and revokes its URL only after the delay', async () => {
+        const revoked = [];
+        const realRevoke = URL.revokeObjectURL;
+        URL.revokeObjectURL = (u) => { revoked.push(u); realRevoke.call(URL, u); };
+        let clicked = null;
+        // Capture the click and cancel it, so the test never writes a real file.
+        const onClick = (e) => {
+            const a = e.target.closest('a');
+            if (!a) return;
+            clicked = {href: a.href, download: a.download, inDocument: document.contains(a)};
+            e.preventDefault();
+        };
+        document.addEventListener('click', onClick, true);
+        try {
+            download.downloadBlob(new Blob(['hi'], {type: 'text/plain'}), 'notes.md', {revokeAfterMs: 80});
+            assert(clicked, 'link clicked');
+            assert(clicked.download === 'notes.md', 'download name: ' + clicked.download);
+            assert(clicked.href.startsWith('blob:'), 'blob URL: ' + clicked.href);
+            assert(clicked.inDocument, 'link was in the document when clicked');
+            assert(!document.querySelector('a[download]'), 'link removed afterwards');
+            assert(revoked.length === 0, 'URL not revoked straight after the click');
+            await sleep(200);
+            assert(revoked.length === 1 && revoked[0] === clicked.href, 'URL revoked after the delay');
+        } finally {
+            document.removeEventListener('click', onClick, true);
+            URL.revokeObjectURL = realRevoke;
+        }
+    });
+
+    h.test('toFilenameSafe is exported for the browser too', () => {
+        assert(download.toFilenameSafe('a/b') === 'a b', 'a/b');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

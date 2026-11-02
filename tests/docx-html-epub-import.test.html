@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HTML import tests</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background: #fafafa;
+        }
+
+        h1 {
+            font-size: 1.3rem;
+            margin-bottom: 4px;
+        }
+
+        .summary {
+            font-size: 0.9rem;
+            color: #555;
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+
+        th {
+            text-align: left;
+            padding: 8px 12px;
+            background: #333;
+            color: #fff;
+        }
+
+        td {
+            padding: 7px 12px;
+            border-bottom: 1px solid #e8e8e8;
+        }
+
+        tr.pass td:first-child::before {
+            content: "✓ ";
+            color: #22a663;
+            font-weight: 700;
+        }
+
+        tr.fail td:first-child::before {
+            content: "✗ ";
+            color: #cc2222;
+            font-weight: 700;
+        }
+
+        tr.pass {
+            background: #f0fff4;
+        }
+
+        tr.fail {
+            background: #fff0f0;
+        }
+
+        .detail {
+            color: #666;
+            font-size: 0.8rem;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+<h1>html-import.js: htmlToMarkdown tests (Word and EPUB are in importers-docs.test.html)</h1>
+<p class="summary" id="summary">Running…</p>
+<table>
+    <thead>
+    <tr>
+        <th>Test</th>
+        <th>Result</th>
+        <th>Detail</th>
+    </tr>
+    </thead>
+    <tbody id="results"></tbody>
+</table>
+
+<script type="module">
+    import {htmlToMarkdown} from '../js/html-import.js';
+
+    const results = [];
+
+    async function test(name, fn) {
+        try {
+            const ok = await fn();
+            results.push({name, pass: !!ok, detail: ''});
+        } catch (e) {
+            results.push({name, pass: false, detail: e.message});
+        }
+    }
+
+    // ── HTML → Markdown tests ─────────────────────────────────────────────────
+    await test('htmlToMarkdown: basic H1', async () => {
+        const md = await htmlToMarkdown('<html><body><h1>Hello</h1><p>World</p></body></html>');
+        return md.includes('# Hello') && md.includes('World');
+    });
+
+    await test('htmlToMarkdown: strips nav', async () => {
+        const md = await htmlToMarkdown('<html><body><nav>Nav links</nav><main><h1>Content</h1><p>Text</p></main></body></html>');
+        return !md.includes('Nav links') && md.includes('Content');
+    });
+
+    await test('htmlToMarkdown: bold and italic', async () => {
+        const md = await htmlToMarkdown('<p><strong>Bold</strong> and <em>italic</em></p>');
+        return md.includes('**Bold**') && md.includes('*italic*');
+    });
+
+    await test('htmlToMarkdown: code block', async () => {
+        const md = await htmlToMarkdown('<pre><code>const x = 1;</code></pre>');
+        return md.includes('```') && md.includes('const x = 1;');
+    });
+
+    await test('htmlToMarkdown: table', async () => {
+        const html = '<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>';
+        const md = await htmlToMarkdown(html);
+        return md.includes('| A') && md.includes('---') && md.includes('| 1');
+    });
+
+    await test('htmlToMarkdown: guarantees H1 from title', async () => {
+        const md = await htmlToMarkdown('<html><head><title>Page Title</title></head><body><p>Content</p></body></html>');
+        return md.startsWith('# Page Title');
+    });
+
+    await test('htmlToMarkdown: link preservation', async () => {
+        const md = await htmlToMarkdown('<p><a href="https://example.com">click</a></p>');
+        return md.includes('[click](https://example.com)');
+    });
+
+    await test('htmlToMarkdown: list items', async () => {
+        const md = await htmlToMarkdown('<ul><li>Item A</li><li>Item B</li></ul>');
+        // Turndown pads the marker ("-   Item A"); both spellings are valid Markdown lists.
+        return /^-\s+Item A$/m.test(md) && /^-\s+Item B$/m.test(md);
+    });
+
+    // ── Render ────────────────────────────────────────────────────────────────
+    const tbody = document.getElementById('results');
+    let pass = 0, fail = 0;
+    for (const r of results) {
+        const tr = document.createElement('tr');
+        tr.className = r.pass ? 'pass' : 'fail';
+        tr.innerHTML = `<td>${r.name}</td><td>${r.pass ? 'pass' : 'FAIL'}</td><td class="detail">${r.detail}</td>`;
+        tbody.appendChild(tr);
+        r.pass ? pass++ : fail++;
+    }
+    const s = document.getElementById('summary');
+    s.textContent = `${pass} passed · ${fail} failed · ${results.length} total`;
+    s.style.color = fail > 0 ? '#cc2222' : '#22a663';
+</script>
+</body>
+</html>

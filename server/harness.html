@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PrintMD render harness</title>
+<!--
+  The PDF API's first page. It loads the editor's vendor globals and shared
+  export modules (never js/app.js) from https://render.invalid/, where the
+  server answers only repository files under js/, templates/, vendor/ and
+  assets/. window.__bd.prepare() runs the editor's own export steps
+  (prepareExport, then buildPrintDocument) and returns the print document as a
+  string, which the server loads into a second, script-free page to print.
+
+  On top of the editor's steps, for untrusted API input:
+  - iframes are dropped by the sanitiser (allowIframes: false);
+  - every URL the Markdown's HTML would fetch is noted (host only) as a warning;
+  - body images must be data: URIs of png, jpeg, gif, webp or svg up to the
+    size limit, anything else is removed with a warning, as are srcset, <source>,
+    media sources, external SVG references and styles that use url().
+  The template's cover logo and running-head logo (repository assets) are
+  embedded as data: URIs, as the editor's print window does.
+-->
+<script src="/vendor/marked/marked.min.js"></script>
+<script src="/vendor/dompurify/purify.min.js"></script>
+<script src="/vendor/highlightjs/highlight.min.js"></script>
+<script src="/vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+import {prepareExport} from '/js/export-pipeline.js';
+import {configureMarked} from '/js/markdown.js';
+import {getTemplateById} from '/js/templates.js';
+import {buildPrintDocument} from '/js/print-document.js';
+import {cleanMetaValue} from '/js/doc-meta.js';
+// Linear scans shared with the Node side (server/src/untrusted.mjs).
+import {uncountedSpans, cssUrls, srcsetUrls, metaRefreshUrl} from '/__bd/untrusted.mjs';
+
+configureMarked();
+
+const ORIGIN = location.origin;
+const IMAGE_TYPE_RE = /^data:image\/(?:png|jpeg|gif|webp|svg\+xml)(?:;[^,]*)?,/i;
+// Attributes whose URL a browser fetches (links people click, <a href>, are kept).
+const FETCH_ATTRS = new Set(['src', 'srcset', 'href', 'xlink:href', 'poster', 'data', 'background', 'action',
+    'formaction', 'codebase', 'lowsrc', 'dynsrc', 'manifest', 'icon', 'archive', 'longdesc', 'imagesrcset']);
+const NOT_FETCHED = /^(?:javascript|mailto|tel|sms|about):/i;
+
+// Long data:image URIs are swapped for placeholders before the Markdown is
+// parsed (marked's regular expressions overflow on a single line of several
+// MB). A placeholder is letters and digits only, with a random part per render,
+// so Markdown, autolinking and highlight.js leave it whole and a document cannot
+// guess it. After sanitising it goes back as the real URI into <img src> (the
+// type and size checks then run on the real value) and into text, code and
+// other non-URL attributes; any other URL attribute holding one is dropped.
+let placeholderPrefix = '';
+let placeholderRe = null;
+const placeholder = (index) => `${placeholderPrefix}${index}z`;
+
+function newPlaceholders() {
+    const bytes = crypto.getRandomValues(new Uint8Array(8));
+    placeholderPrefix = `bdimg${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}n`;
+    placeholderRe = new RegExp(`${placeholderPrefix}(\\d+)z`, 'g');
+}
+
+/**
+ * The size the HTML would have once every placeholder is expanded: each
+ * reference to an image counts at the image's full size, so one image used
+ * hundreds of times is counted hundreds of times. Nothing is expanded here.
+ */
+function expandedSize(...parts) {
+    let total = 0;
+    for (const html of parts) {
+        total += html.length;
+        if (!placeholderPrefix || !html.includes(placeholderPrefix)) continue;
+        for (const m of html.matchAll(placeholderRe)) {
+            const uri = stash[Number(m[1])];
+            if (uri !== undefined) total += uri.length - m[0].length;
+        }
+    }
+    return total;
+}
+
+/** Text with every placeholder put back as its URI. */
+function restoreText(text) {
+    if (!placeholderPrefix || !text.includes(placeholderPrefix)) return text;
+    return text.replace(placeholderRe, (m, i) => (stash[Number(i)] === undefined ? m : stash[Number(i)]));
+}
+
+/**
+ * Swap each long base64 data:image URI for a placeholder: exactly the spans the
+ * 2 MB size check leaves out (uncountedSpans in server/src/untrusted.mjs).
+ */
+function stashLongDataImages(markdown, out) {
+    let result = '';
+    let from = 0;
+    for (const span of uncountedSpans(markdown)) {
+        out.push(markdown.slice(span.start, span.end));
+        result += markdown.slice(from, span.start) + placeholder(out.length - 1);
+        from = span.end;
+    }
+    return result + markdown.slice(from);
+}
+
+let blocked = new Set();
+let stash = [];
+
+function label(raw) {
+    try {
+        const u = new URL(raw, ORIGIN + '/');
+        return /^(?:https?|wss?|ftp):$/.test(u.protocol) ? (u.host || u.protocol) : u.protocol;
+    } catch {
+        return 'an unreadable address';
+    }
+}
+
+/** Note a URL the document would fetch: absolute ones by host, never by path. */
+function note(raw) {
+    const url = String(raw || '').trim();
+    if (!url || url.startsWith('#') || /^data:/i.test(url) || NOT_FETCHED.test(url)) return;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//')) blocked.add(label(url));
+}
+
+// Runs on every node DOMPurify looks at, before it removes anything, so the
+// hosts of elements it drops (iframe, link, object, meta refresh) are noted too.
+DOMPurify.addHook('uponSanitizeElement', (node) => {
+    if (node.nodeType !== 1) return;
+    const tag = (node.localName || '').toLowerCase();
+    if (tag === 'style') cssUrls(node.textContent).forEach(note);
+    for (const attr of Array.from(node.attributes || [])) {
+        const name = attr.name.toLowerCase();
+        const value = attr.value;
+        if (name === 'style') cssUrls(value).forEach(note);
+        else if (name === 'srcset' || name === 'imagesrcset') srcsetUrls(value).forEach(note);
+        else if (name === 'content' && tag === 'meta') note(metaRefreshUrl(value));
+        else if (FETCH_ATTRS.has(name) && !((tag === 'a' || tag === 'area') && name === 'href')) note(value);
+    }
+});
+
+function dataUriBytes(src) {
+    const comma = src.indexOf(',');
+    const payload = src.slice(comma + 1);
+    if (/;base64$/i.test(src.slice(0, comma))) return Math.floor(payload.replace(/[^A-Za-z0-9+/]/g, '').length * 3 / 4);
+    try {
+        return new TextEncoder().encode(decodeURIComponent(payload)).length;
+    } catch {
+        return payload.length;
+    }
+}
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+/** Apply the API's image and external-reference rules to the sanitised body. */
+function filterBody(html, maxImageBytes, warnings) {
+    if (!html) return html;
+    const doc = new DOMParser().parseFromString(`<!DOCTYPE html><html><body>${html}</body></html>`, 'text/html');
+    let notData = 0, badType = 0, tooBig = 0, other = 0;
+    // Placeholders: the URI goes back into <img src> (when the attribute is
+    // exactly one placeholder), into text and into attributes that are not
+    // URLs; any other URL attribute holding one is dropped.
+    if (placeholderPrefix && html.includes(placeholderPrefix)) {
+        for (const el of Array.from(doc.body.querySelectorAll('*'))) {
+            for (const attr of Array.from(el.attributes)) {
+                if (!attr.value.includes(placeholderPrefix)) continue;
+                const name = attr.name.toLowerCase();
+                const exact = /^\s*bdimg[0-9a-f]+n(\d+)z\s*$/.exec(attr.value);
+                if (el.localName === 'img' && name === 'src' && exact && attr.value.trim() === placeholder(exact[1])
+                    && stash[Number(exact[1])] !== undefined) {
+                    el.setAttribute('src', stash[Number(exact[1])]);
+                } else if (FETCH_ATTRS.has(name) || name === 'style') {
+                    el.removeAttribute(attr.name);
+                } else {
+                    el.setAttribute(attr.name, restoreText(attr.value));
+                }
+            }
+        }
+        const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (node.data.includes(placeholderPrefix)) node.data = restoreText(node.data);
+        }
+    }
+    for (const img of Array.from(doc.querySelectorAll('img'))) {
+        const src = (img.getAttribute('src') || '').trim();
+        img.removeAttribute('srcset');
+        img.removeAttribute('sizes');
+        if (!/^data:/i.test(src)) { img.remove(); notData++; }
+        else if (!IMAGE_TYPE_RE.test(src)) { img.remove(); badType++; }
+        else if (dataUriBytes(src) > maxImageBytes) { img.remove(); tooBig++; }
+    }
+    for (const el of Array.from(doc.querySelectorAll('source, track'))) { el.remove(); other++; }
+    for (const el of Array.from(doc.querySelectorAll('video, audio'))) {
+        if (el.hasAttribute('src') || el.hasAttribute('poster')) other++;
+        el.removeAttribute('src');
+        el.removeAttribute('poster');
+    }
+    for (const el of Array.from(doc.body.querySelectorAll('*'))) {
+        if (el.namespaceURI === 'http://www.w3.org/2000/svg') {
+            for (const name of ['href', 'xlink:href']) {
+                const v = el.getAttribute(name);
+                if (v && !v.trim().startsWith('#')) { el.removeAttribute(name); other++; }
+            }
+        }
+        const style = el.getAttribute('style');
+        if (style && cssUrls(style).some((u) => !/^\s*data:/i.test(u))) { el.removeAttribute('style'); other++; }
+    }
+    if (notData) warnings.push(`Removed ${plural(notData, 'image', 'images')} not embedded as a data: URI. Embed images as data:image/png;base64,... (png, jpeg, gif, webp or svg).`);
+    if (badType) warnings.push(`Removed ${plural(badType, 'image', 'images')} of a type other than png, jpeg, gif, webp or svg.`);
+    if (tooBig) warnings.push(`Removed ${plural(tooBig, 'image', 'images')} larger than ${Math.round(maxImageBytes / 1048576)} MB.`);
+    if (other) warnings.push(`Removed ${plural(other, 'external media reference', 'external media references')} (srcset, <source>, media, SVG or CSS url()).`);
+    return doc.body.innerHTML;
+}
+
+async function toDataUrl(url) {
+    const blob = await (await fetch(url)).blob();
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+/** The cover comes from the template: its own repository images are embedded, anything else removed. */
+async function embedCoverImages(html) {
+    if (!html || !html.includes('<img')) return html;
+    const doc = new DOMParser().parseFromString(`<!DOCTYPE html><html><body>${html}</body></html>`, 'text/html');
+    await Promise.all(Array.from(doc.querySelectorAll('img'), async (img) => {
+        const src = img.getAttribute('src') || '';
+        if (src.startsWith('data:')) return;
+        try {
+            if (new URL(src, ORIGIN + '/').origin !== ORIGIN) throw new Error('not ours');
+            img.setAttribute('src', await toDataUrl(src));
+        } catch {
+            img.remove();
+        }
+    }));
+    return doc.body.innerHTML;
+}
+
+/**
+ * The running head's logo (js/page-chrome.js) as a data: URI, as the cover's images are:
+ * a repository image of the render origin is embedded, anything else is left out.
+ */
+async function embedRunningLogo(running) {
+    if (!running || !running.logo || running.logo.src.startsWith('data:')) return running;
+    try {
+        if (new URL(running.logo.src, ORIGIN + '/').origin !== ORIGIN) throw new Error('not ours');
+        return {...running, logo: {...running.logo, src: await toDataUrl(new URL(running.logo.src, ORIGIN + '/').href)}};
+    } catch {
+        return {...running, logo: null};
+    }
+}
+
+let hljsCSS = null;
+
+window.__bd = {
+    /**
+     * @param {{markdown: string, templateId: string, pageSize?: string, orientation?: string,
+     *          layout?: string, fit?: string, margin?: string,
+     *          meta: object, today: string, maxImageBytes: number, maxExpandedBytes: number,
+     *          lang?: string, printLinks?: boolean, cover?: boolean}} input  cover: false leaves the cover out;
+     *          the page options as the API checked them (js/export-pipeline.js checks them again)
+     * @returns {Promise<{html: string, title: string, warnings: string[], advisories: string[], pageOpts: object,
+     *          print: {lang: string, author: string, subject: string, printLinks: boolean}, cover: boolean}
+     *          | {tooLarge: true}>}
+     */
+    async prepare(input) {
+        blocked = new Set();
+        stash = [];
+        newPlaceholders();
+        const entry = getTemplateById(input.templateId);
+        if (!entry) throw new Error('unknown template');
+        const markdown = stashLongDataImages(input.markdown, stash);
+        const prepared = prepareExport(markdown, entry, {
+            pageSize: input.pageSize,
+            orientation: input.orientation,
+            layout: input.layout,
+            fit: input.fit,
+            margin: input.margin,
+            date: new Date(input.today),
+            allowIframes: false,
+            meta: input.meta,
+            lang: input.lang,
+            printLinks: input.printLinks,
+        });
+        if (input.cover === false) prepared.coverHTML = '';
+        // A title taken from a heading that held a placeholder: the real text, cut
+        // like any title (js/doc-meta.js cleanMetaValue), and the cover drawn again.
+        if (prepared.doc.title.includes(placeholderPrefix)) {
+            prepared.doc.title = cleanMetaValue(restoreText(prepared.doc.title));
+            if (input.cover !== false && typeof entry.template.renderCover === 'function') {
+                prepared.coverHTML = String(entry.template.renderCover(prepared.doc) || '');
+            }
+        }
+        // The expanded size is checked before anything is expanded (server/src/renderer.mjs answers 413).
+        if (expandedSize(prepared.bodyHTML, prepared.coverHTML) > input.maxExpandedBytes) return {tooLarge: true};
+        const warnings = [...prepared.warnings];
+        const bodyHTML = filterBody(prepared.bodyHTML, input.maxImageBytes, warnings);
+        const coverHTML = await embedCoverImages(prepared.coverHTML);
+        const print = prepared.print.running ? {...prepared.print, running: await embedRunningLogo(prepared.print.running)} : prepared.print;
+        if (hljsCSS === null) hljsCSS = await (await fetch('/vendor/highlightjs/atom-one-dark.min.css')).text();
+        for (const host of [...blocked].sort()) warnings.push(`Blocked a request to ${host}.`);
+        const html = buildPrintDocument({
+            title: prepared.doc.title,
+            templateId: entry.manifest.id,
+            templateCSS: entry.styles,
+            hljsCSS,
+            bodyHTML,
+            coverHTML,
+            pageOpts: prepared.pageOpts,
+            ...print,
+        });
+        if (html.length > input.maxExpandedBytes) return {tooLarge: true};
+        // The first heading's text: Chromium's outline can print it twice after a cover (server/src/pdf-info.mjs).
+        const firstHeading = coverHTML
+            ? (new DOMParser().parseFromString(bodyHTML, 'text/html').querySelector('h1, h2, h3, h4, h5, h6')?.textContent || '')
+            : '';
+        return {html, title: prepared.doc.title, warnings, advisories: prepared.advisories || [], pageOpts: prepared.pageOpts,
+            print: prepared.print, cover: Boolean(coverHTML), firstHeading};
+    },
+
+    /**
+     * The page count of a PDF the renderer printed, and the words on its last
+     * page (pdf.js, vendor/pdfjs/), for the nearly-empty-last-page tidy.
+     * @param {string} base64  the PDF
+     * @returns {Promise<{pages: number, lastWords: number}>}
+     */
+    async pageWords(base64) {
+        const pdfjs = await import('/vendor/pdfjs/pdf.min.mjs');
+        if (!pdfjs.GlobalWorkerOptions.workerSrc) pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
+        const data = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        const task = pdfjs.getDocument({data, isEvalSupported: false, disableFontFace: true, stopAtErrors: true});
+        try {
+            const doc = await task.promise;
+            const page = await doc.getPage(doc.numPages);
+            const content = await page.getTextContent();
+            // Items carry their own spaces (a word can be split across items), and hasEOL ends a line:
+            // the same count pdftotext gives.
+            const text = content.items.map((item) => (item.str || '') + (item.hasEOL ? '\n' : '')).join('');
+            const words = text.split(/\s+/).filter(Boolean).length;
+            return {pages: doc.numPages, lastWords: words};
+        } finally {
+            await task.destroy();
+        }
+    },
+};
+window.__bdReady = true;
+</script>
+</head>
+<body></body>
+</html>

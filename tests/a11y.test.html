@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Accessibility Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        #app { width: 1400px; height: 900px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>Accessibility: ARIA, contrast, live regions and the shared dialog helper</h1>
+<p>The keyboard walkthrough with real key events and the accessibility tree is
+    <code>tests/a11y-keys.mjs</code> (the <code>a11y-keys</code> suite of <code>tests/run-all.mjs</code>).</p>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<div id="fixture">
+    <button id="fx-opener" type="button">opener</button>
+    <div id="fx-other"><button type="button">other</button></div>
+    <div id="fx-live" role="status"></div>
+    <div id="fx-banner" role="alert">Storage unavailable <button type="button">Dismiss</button></div>
+    <div id="fx-a" hidden role="dialog" aria-modal="true" aria-label="A">
+        <button id="fx-a1" type="button">a1</button>
+        <input id="fx-a2" type="text">
+        <button id="fx-a3" type="button">a3</button>
+        <button id="fx-a-hidden" type="button" hidden>hidden</button>
+    </div>
+    <div id="fx-b" hidden role="dialog" aria-modal="true" aria-label="B">
+        <button id="fx-b1" type="button">b1</button>
+    </div>
+</div>
+<iframe id="app" title="app under test"></iframe>
+<script type="module">
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+    import * as dialogA11y from '../js/dialog-a11y.js';
+
+    const h = createHarness('A11Y');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const frame = document.getElementById('app');
+    let win, doc;
+    const $ = (sel) => doc.querySelector(sel);
+
+    async function waitFor(fn, what, ms = 4000) {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+            try { if (fn()) return; } catch (_e) { /* not ready */ }
+            await sleep(20);
+        }
+        throw new Error('timed out waiting for ' + what);
+    }
+
+    // ── Colour maths (WCAG 2.x relative luminance) ──────────────────────────
+    function parseColor(s) {
+        const m = /rgba?\(([^)]+)\)/.exec(s);
+        if (!m) throw new Error('cannot parse colour ' + s);
+        const p = m[1].split(/[ ,/]+/).filter(Boolean).map(Number);
+        return {r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1};
+    }
+    const blend = (fg, bg, alpha = fg.a) => ({
+        r: fg.r * alpha + bg.r * (1 - alpha), g: fg.g * alpha + bg.g * (1 - alpha), b: fg.b * alpha + bg.b * (1 - alpha), a: 1,
+    });
+    function luminance({r, g, b}) {
+        const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    }
+    function ratio(a, b) {
+        const [l1, l2] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+        return (l1 + 0.05) / (l2 + 0.05);
+    }
+    /** The opaque background behind an element: the first ancestor with a non-transparent background. */
+    function backgroundOf(el) {
+        const layers = [];
+        for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+            const c = parseColor(win.getComputedStyle(n).backgroundColor);
+            if (c.a > 0) { layers.push(c); if (c.a === 1) break; }
+        }
+        let base = {r: 255, g: 255, b: 255, a: 1};
+        for (const c of layers.reverse()) base = blend(c, base);
+        return base;
+    }
+    /** Text colour as painted: its alpha and every ancestor's opacity blended over the background. */
+    function textContrast(el, pseudo = null) {
+        const bg = backgroundOf(el);
+        const fg = parseColor(win.getComputedStyle(el, pseudo).color);
+        let opacity = fg.a;
+        for (let n = el; n && n.nodeType === 1; n = n.parentElement) opacity *= Number(win.getComputedStyle(n).opacity);
+        return ratio(blend(fg, bg, opacity), bg);
+    }
+
+    h.test('boot the app', async () => {
+        await resetStorage();
+        // A short first document instead of the long welcome one (js/store.js migrateFromLocalStorage): a lighter boot.
+        localStorage.setItem('printmd-state', JSON.stringify({source: '# First doc\n\ntext'}));
+        frame.src = '../index.html';
+        await new Promise(res => frame.addEventListener('load', res, {once: true}));
+        win = frame.contentWindow;
+        doc = frame.contentDocument;
+        await waitFor(() => win.__bd && win.__bd.docManager.currentId != null, 'app boot');
+        await win.__bd.docManager.newDoc('# Second doc\n\ntext');
+        await win.__bd.renderSidebar();
+    });
+
+    h.test('no duplicate ids; lang set; one main; a skip link to the editor comes first', async () => {
+        const seen = new Map();
+        for (const el of doc.querySelectorAll('[id]')) seen.set(el.id, (seen.get(el.id) || 0) + 1);
+        const dups = [...seen].filter(([, n]) => n > 1).map(([id]) => id);
+        assert(dups.length === 0, 'duplicate ids: ' + dups.join(', '));
+        assert(doc.documentElement.lang === 'en', 'lang');
+        assert(doc.querySelectorAll('main, [role="main"]').length === 1, 'one main');
+        assert(doc.querySelector('main').contains($('#editor')), 'the editor is in main');
+        const skip = $('a.skip-link');
+        assert(skip && skip.getAttribute('href') === '#editor' && skip === doc.querySelector('a, button, input, select, textarea, [tabindex]'), 'skip link first');
+        skip.focus();
+        skip.click();
+        assert(doc.activeElement === $('#editor'), 'the skip link focuses the editor');
+    });
+
+    h.test('favicon: a link rel=icon to assets/favicon.svg that loads', async () => {
+        const link = doc.querySelector('link[rel="icon"]');
+        assert(link && link.getAttribute('href') === 'assets/favicon.svg', 'link rel=icon');
+        const r = await fetch('../assets/favicon.svg');
+        assert(r.ok && /svg/.test(r.headers.get('content-type')), 'served as SVG');
+        assert(/<svg[\s>]/.test(await r.text()), 'an SVG');
+    });
+
+    h.test('every modal is a named dialog with aria-modal and resolving labels', async () => {
+        const modals = {
+            'drive-modal': 'dialog', 'conflict-modal': 'alertdialog', 'preflight-modal': 'alertdialog',
+            'password-modal': 'dialog', 'import-confirm-modal': 'alertdialog', 'cmdk': 'dialog',
+        };
+        for (const [id, role] of Object.entries(modals)) {
+            const el = $('#' + id);
+            assert(el.getAttribute('role') === role, `${id} role ${el.getAttribute('role')}`);
+            assert(el.getAttribute('aria-modal') === 'true', `${id} aria-modal`);
+            const label = el.getAttribute('aria-labelledby');
+            const name = label ? doc.getElementById(label) && doc.getElementById(label).textContent.trim() : el.getAttribute('aria-label');
+            assert(name, `${id} has a name`);
+            const desc = el.getAttribute('aria-describedby');
+            if (desc) assert(doc.getElementById(desc), `${id} describedby resolves`);
+        }
+        const pop = $('#template-info-popover');
+        assert(pop.getAttribute('role') === 'dialog' && pop.getAttribute('aria-label'), 'template popover is a named dialog');
+    });
+
+    h.test('sidebar: a labelled filter, a list of open buttons and labelled delete buttons', async () => {
+        const filter = $('#doc-filter');
+        assert(filter.labels.length === 1 && filter.labels[0].textContent.trim() === 'Search documents by title', 'filter has a <label>');
+        assert($('#doc-list').getAttribute('aria-label') === 'Recent files', 'list label');
+        const items = [...doc.querySelectorAll('#doc-list .doc-item')];
+        assert(items.length === 2, 'two docs');
+        for (const li of items) {
+            const title = li.querySelector('.doc-title').textContent;
+            const open = li.querySelector('button.doc-open');
+            const del = li.querySelector('button.doc-del');
+            assert(open && open.contains(li.querySelector('.doc-title')), 'title inside an open button');
+            assert(del && del.getAttribute('aria-label') === 'Delete ' + title, 'delete label: ' + (del && del.getAttribute('aria-label')));
+            assert(!open.contains(del), 'the delete button is not inside the open button');
+            const current = li.classList.contains('active');
+            assert(open.hasAttribute('aria-current') === current, 'aria-current only on the open doc');
+        }
+        // Exactly one item is a Tab stop (roving tabindex).
+        const stops = items.map(li => li.querySelector('.doc-open').tabIndex);
+        assert(stops.filter(t => t === 0).length === 1, 'one tab stop: ' + JSON.stringify(stops));
+    });
+
+    h.test('sidebar: a key event from the delete button does not open the document', async () => {
+        const items = [...doc.querySelectorAll('#doc-list .doc-item')];
+        const other = items.find(li => !li.classList.contains('active'));
+        const openId = win.__bd.docManager.currentId;
+        const del = other.querySelector('.doc-del');
+        let asked = 0;
+        win.confirm = () => { asked++; return false; };
+        for (const key of ['Enter', ' ', 'ArrowDown']) {
+            del.dispatchEvent(new win.KeyboardEvent('keydown', {key, bubbles: true, cancelable: true}));
+        }
+        // A switch would queue behind the save queue: drain it, then look.
+        await win.__bd.docManager.saveCurrent();
+        await win.__bd.renderSidebar();
+        assert(win.__bd.docManager.currentId === openId, 'the open document did not change');
+        del.click();
+        assert(asked === 1, 'clicking the delete button asks to confirm');
+    });
+
+    h.test('the delete button shows on focus-visible and on touch screens', async () => {
+        const rules = [];
+        const walk = (list, media) => {
+            for (const r of list) {
+                if (r.cssRules && r.media) walk(r.cssRules, r.media.mediaText);
+                else if (r.selectorText) rules.push({sel: r.selectorText, media, style: r.style});
+            }
+        };
+        for (const sheet of doc.styleSheets) {
+            try { walk(sheet.cssRules, ''); } catch (_e) { /* cross-origin */ }
+        }
+        const shown = (r) => /\.doc-del/.test(r.sel) && Number(r.style.opacity) >= 0.5;
+        assert(rules.some(r => shown(r) && /focus-visible|focus-within/.test(r.sel)), 'a focus rule shows .doc-del');
+        assert(rules.some(r => shown(r) && /hover:\s*none/.test(r.media)), 'a (hover: none) rule shows .doc-del');
+    });
+
+    h.test('no outline: none without a :focus-visible replacement', async () => {
+        const bad = [];
+        for (const sheet of doc.styleSheets) {
+            let rules;
+            try { rules = sheet.cssRules; } catch (_e) { continue; }
+            for (const r of rules) {
+                if (!r.style || !r.selectorText) continue;
+                if (r.style.outlineStyle !== 'none' && !/^0(px)?$/.test(r.style.outlineWidth)) continue;
+                if (/focus-visible/.test(r.selectorText)) continue;
+                // Elements the rule applies to, pseudo-classes stripped (":focus" rules apply on focus).
+                const plain = r.selectorText.replace(/::?[\w-]+(\([^)]*\))?/g, '');
+                for (const el of doc.querySelectorAll(plain || '*')) {
+                    if (el.tabIndex < 0 && !el.matches('input, textarea, select, button')) continue;
+                    el.focus();
+                    if (doc.activeElement !== el) continue;
+                    const cs = win.getComputedStyle(el);
+                    const ring = cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) >= 2;
+                    if (!ring) bad.push(r.selectorText + ' -> ' + (el.id || el.className));
+                }
+            }
+        }
+        assert(bad.length === 0, 'no ring: ' + bad.join('; '));
+    });
+
+    /** Colours are read mid-transition after a theme switch unless transitions are off. */
+    function freezeTransitions() {
+        const style = doc.createElement('style');
+        style.textContent = '*, *::before, *::after { transition: none !important; animation: none !important; }';
+        doc.head.appendChild(style);
+        return () => style.remove();
+    }
+
+    h.test('focus ring colour meets 3:1 against the background behind it, light and dark', async () => {
+        const unfreeze = freezeTransitions();
+        try {
+            // [element, what the ring is drawn over]: an outset ring sits on the parent, an inset one on the element.
+            const cases = [['#btn-new', '#toolbar-nav'], ['#editor', '#editor'], ['#doc-filter', '#sidebar'],
+                ['#divider', '#main'], ['#doc-list .doc-item.active .doc-open', '#doc-list'],
+                ['#doc-list .doc-item:not(.active) .doc-open', '#doc-list'], ['#btn-export', '#toolbar-nav']];
+            for (const theme of ['light', 'dark']) {
+                doc.documentElement.setAttribute('data-theme', theme);
+                for (const [sel, behind] of cases) {
+                    const el = $(sel);
+                    el.focus();
+                    const ring = parseColor(win.getComputedStyle(el).outlineColor);
+                    const r = ratio(ring, backgroundOf($(behind)));
+                    assert(r >= 3, `${theme} ${sel} ring ${r.toFixed(2)}:1`);
+                }
+            }
+        } finally {
+            doc.documentElement.setAttribute('data-theme', 'light');
+            doc.activeElement.blur();
+            unfreeze();
+        }
+    });
+
+    h.test('sidebar focus rings contrast with the row fill and with the list, light and dark', async () => {
+        const unfreeze = freezeTransitions();
+        const failures = [];
+        try {
+            const list = $('#doc-list');
+            const activeRow = $('#doc-list .doc-item.active');
+            const otherRow = $('#doc-list .doc-item:not(.active)');
+            assert(activeRow && otherRow, 'an open row and another row');
+            for (const theme of ['light', 'dark']) {
+                doc.documentElement.setAttribute('data-theme', theme);
+                const listBg = backgroundOf(list);
+                const fill = backgroundOf(activeRow);
+                // [element, the colours its ring must stand out from]
+                const cases = [
+                    [otherRow.querySelector('.doc-open'), {list: listBg}],
+                    [otherRow.querySelector('.doc-del'), {list: listBg}],
+                    [activeRow.querySelector('.doc-open'), {list: listBg, fill}],
+                    [activeRow.querySelector('.doc-del'), {fill}],
+                ];
+                for (const [el, against] of cases) {
+                    el.focus();
+                    const cs = win.getComputedStyle(el);
+                    const name = `${theme} ${el.closest('.active') ? 'open row' : 'other row'} ${el.className}`;
+                    if (cs.outlineStyle === 'none' || parseFloat(cs.outlineWidth) < 2) { failures.push(name + ': no ring'); continue; }
+                    // The ring is the outline plus, where set, a box-shadow ring: the best of them per background counts.
+                    const rings = [parseColor(cs.outlineColor)];
+                    if (cs.boxShadow && cs.boxShadow !== 'none') rings.push(parseColor(cs.boxShadow));
+                    for (const [what, bg] of Object.entries(against)) {
+                        const best = Math.max(...rings.map((c) => ratio(blend(c, bg), bg)));
+                        if (best < 3) failures.push(`${name} against the ${what}: ${best.toFixed(2)}:1`);
+                    }
+                }
+            }
+        } finally {
+            doc.documentElement.setAttribute('data-theme', 'light');
+            doc.activeElement.blur();
+            unfreeze();
+        }
+        assert(failures.length === 0, failures.join('; '));
+    });
+
+    h.test('text contrast meets AA (4.5:1) for muted text, placeholders and status colours, light and dark', async () => {
+        const status = $('#autosave-status');
+        const checks = [
+            ['.toolbar-label', null], ['.btn-heading', null], ['.sidebar-title', null], ['.btn-mini', null],
+            ['#doc-list .doc-item:not(.active) .doc-time', null], ['#doc-list .doc-item.active .doc-time', null],
+            ['#footer', null], ['#word-count', null],
+            ['#editor', '::placeholder'], ['#doc-filter', '::placeholder'], ['#cmdk-input', '::placeholder'],
+            ['#drive-url-input', '::placeholder'], ['.drive-help', null], ['.drive-tab:not(.active)', null],
+            ['.drive-tab.active', null], ['#drive-modal-panel label', null],
+        ];
+        const failures = [];
+        // A document switch fades the editor in from opacity 0 on the next frame (flashEditor in js/app.js).
+        await waitFor(() => win.getComputedStyle($('#editor')).opacity === '1', 'the editor fade-in');
+        const unfreeze = freezeTransitions();
+        if (doc.activeElement) doc.activeElement.blur();   // a focused sidebar item hides its time
+        for (const theme of ['light', 'dark']) {
+            doc.documentElement.setAttribute('data-theme', theme);
+            const drive = $('#drive-modal');
+            drive.style.display = 'block';
+            for (const [sel, pseudo] of checks) {
+                const el = $(sel);
+                if (!el) { failures.push(`${sel} missing`); continue; }
+                const r = textContrast(el, pseudo);
+                if (r < 4.5) {
+                    const cs = win.getComputedStyle(el, pseudo);
+                    const chain = [];
+                    for (let n = el; n && n.nodeType === 1; n = n.parentElement) chain.push((n.id || n.tagName) + ':' + win.getComputedStyle(n).opacity);
+                    failures.push(`${theme} ${sel}${pseudo || ''} ${r.toFixed(2)} (colour ${cs.color}, opacity ${chain.join(' ')} on ${JSON.stringify(backgroundOf(el))})`);
+                }
+            }
+            drive.style.display = 'none';
+            // The empty-preview hint
+            const empty = doc.createElement('div');
+            empty.className = 'preview-empty';
+            empty.textContent = 'Start writing';
+            $('#preview').appendChild(empty);
+            const er = textContrast(empty);
+            if (er < 4.5) failures.push(`${theme} .preview-empty ${er.toFixed(2)}`);
+            empty.remove();
+            // The save status colours, without the fade animation
+            for (const cls of ['autosave-flash', 'autosave-error']) {
+                status.classList.add(cls);
+                status.style.animation = 'none';
+                const r = textContrast(status);
+                if (r < 4.5) failures.push(`${theme} #autosave-status.${cls} ${r.toFixed(2)}`);
+                status.classList.remove(cls);
+                status.style.animation = '';
+            }
+            // The danger button in the choice dialogs
+            const btn = doc.createElement('button');
+            btn.className = 'btn-secondary btn-danger';
+            btn.textContent = 'Overwrite';
+            $('#conflict-modal [data-role="actions"]').appendChild(btn);
+            $('#conflict-modal').hidden = false;
+            const br = textContrast(btn);
+            if (br < 4.5) failures.push(`${theme} .btn-danger ${br.toFixed(2)}`);
+            $('#conflict-modal').hidden = true;
+            btn.remove();
+        }
+        doc.documentElement.setAttribute('data-theme', 'light');
+        unfreeze();
+        assert(failures.length === 0, failures.join('; '));
+    });
+
+    h.test('the Drive panel is fixed in the middle of the viewport', async () => {
+        win.document.getElementById('btn-import-drive').click();
+        await waitFor(() => win.getComputedStyle($('#drive-modal')).display !== 'none', 'drive open');
+        const panel = $('#drive-modal-panel');
+        assert(win.getComputedStyle(panel).position === 'fixed', 'position ' + win.getComputedStyle(panel).position);
+        const r = panel.getBoundingClientRect();
+        assert(r.top >= 0 && r.bottom <= win.innerHeight && r.left >= 0 && r.right <= win.innerWidth, 'inside the viewport: ' + JSON.stringify(r));
+        assert(Math.abs((r.top + r.bottom) / 2 - win.innerHeight / 2) <= 2, 'vertically centred');
+        $('#drive-modal-close').click();
+    });
+
+    h.test('live regions: a polite status and an alert exist; the footer status itself does not chatter', async () => {
+        const status = $('body > .sr-status');
+        const alertEl = $('body > .sr-alert');
+        assert(status && status.getAttribute('role') === 'status' && status.getAttribute('aria-live') === 'polite', 'polite status region');
+        assert(alertEl && alertEl.getAttribute('role') === 'alert', 'alert region');
+        const footer = $('#autosave-status');
+        assert(!footer.hasAttribute('aria-live') || footer.getAttribute('aria-live') === 'off', 'the footer text is not live');
+        assert($('#storage-banner').getAttribute('role') === 'alert', 'the storage banner is an alert');
+    });
+
+    /** Record every text the live regions receive. */
+    /** A clipboard that accepts the copy: a test page in a frame has no clipboard access of its own. */
+    function workingClipboard() {
+        Object.defineProperty(win.navigator, 'clipboard', {configurable: true, value: {writeText: async () => {}}});
+    }
+
+    function recordAnnouncements() {
+        const log = {status: [], alert: []};
+        const watch = (el, list) => {
+            const mo = new win.MutationObserver(() => { const t = el.textContent.trim(); if (t) list.push(t); });
+            mo.observe(el, {childList: true, characterData: true, subtree: true});
+            return mo;
+        };
+        const obs = [watch($('body > .sr-status'), log.status), watch($('body > .sr-alert'), log.alert)];
+        log.stop = () => obs.forEach(o => o.disconnect());
+        return log;
+    }
+
+    async function type(text) {
+        const editor = $('#editor');
+        editor.value += text;
+        editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+        try { await win.__bd.docManager.saveCurrent(); } catch (_e) { /* reported through io.onSaveError */ }
+    }
+
+    // Announcements are queued with the same short delay, so they arrive in order:
+    // once a later announcement has arrived, any earlier one would have too. The
+    // checks for "nothing was announced" wait for a later, expected one instead of a fixed time.
+    h.test('save status: routine saves announce nothing; a failure is one alert; recovery is one "Saved"', async () => {
+        const log = recordAnnouncements();
+        try {
+            for (let i = 0; i < 3; i++) await type(' ok' + i);
+            const proto = win.IDBObjectStore.prototype;
+            const realPut = proto.put;
+            proto.put = function () { throw new win.DOMException('disk full (test)', 'QuotaExceededError'); };
+            try {
+                await type(' fail1');
+                await waitFor(() => log.alert.length >= 1, 'the failure alert');
+                assert(log.status.length === 0, 'routine saves announced: ' + JSON.stringify(log.status));
+                await type(' fail2');
+                await type(' fail3');
+            } finally {
+                proto.put = realPut;
+            }
+            assert($('#autosave-status').textContent === 'Not saved', 'footer says Not saved');
+            await type(' back');
+            await waitFor(() => log.status.length >= 1, 'the recovery announcement');
+            assert(log.alert.length === 1 && /not saved/i.test(log.alert[0]), 'one alert for three failures: ' + JSON.stringify(log.alert));
+            await type(' again');
+            workingClipboard();
+            $('#btn-copy-html').click();   // a later, expected announcement
+            await waitFor(() => log.status.length >= 2, 'the copy toast');
+            assert(log.status[0] === 'Saved' && log.status.length === 2 && /HTML|copy/i.test(log.status[1]),
+                'one Saved after recovery, nothing for the next save: ' + JSON.stringify(log.status));
+            assert(log.alert.length === 1, 'no more alerts');
+        } finally {
+            log.stop();
+        }
+    });
+
+    h.test('a failed import is announced as an alert; the visual toast is hidden from screen readers', async () => {
+        const log = recordAnnouncements();
+        try {
+            const input = $('#docx-input');
+            const dt = new win.DataTransfer();
+            dt.items.add(new win.File(['this is not a zip'], 'broken.docx'));
+            input.files = dt.files;
+            input.dispatchEvent(new win.Event('change', {bubbles: true}));
+            await waitFor(() => log.alert.length >= 1, 'import failure alert', 4000);
+            assert(/import failed/i.test(log.alert[0]), 'alert text: ' + log.alert[0]);
+            const toast = doc.querySelector('body > #toast');
+            assert(toast && toast.getAttribute('aria-hidden') === 'true', 'the visual toast is aria-hidden');
+        } finally {
+            log.stop();
+        }
+    });
+
+    h.test('a normal toast is announced politely', async () => {
+        const log = recordAnnouncements();
+        try {
+            workingClipboard();
+            $('#btn-copy-html').click();
+            await waitFor(() => log.status.length >= 1, 'copy toast announced', 2000);
+            assert(log.alert.length === 0 && /copied/i.test(log.status[0]), 'polite, not an alert: ' + JSON.stringify(log));
+        } finally {
+            log.stop();
+        }
+    });
+
+    h.test('the divider is a focusable separator with a value', async () => {
+        const d = $('#divider');
+        assert(d.getAttribute('role') === 'separator' && d.tabIndex === 0, 'focusable separator');
+        assert(d.getAttribute('aria-orientation') === 'vertical', 'orientation');
+        assert(d.getAttribute('aria-valuemin') === '20' && d.getAttribute('aria-valuemax') === '80' && d.getAttribute('aria-valuenow') === '50', 'values');
+        assert(d.getAttribute('aria-controls') === 'editor-pane', 'controls the editor pane');
+    });
+
+    // ── js/dialog-a11y.js on a local fixture ─────────────────────────────────
+    const key = (k, opts = {}) => (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true, ...opts}));
+    const fx = (id) => document.getElementById(id);
+
+    h.test('dialog helper: focus moves in, Tab wraps (skipping hidden controls), background inert, Escape, restore', async () => {
+        fx('fx-opener').focus();
+        const a = fx('fx-a');
+        a.hidden = false;
+        let escaped = 0;
+        const m = dialogA11y.openModal(a, {initialFocus: fx('fx-a2'), onEscape: () => { escaped++; }});
+        assert(document.activeElement === fx('fx-a2'), 'initial focus');
+        assert(fx('fx-other').inert && fx('fx-opener').inert && frame.inert, 'siblings inert');
+        assert(!fx('fx-live').inert, 'live regions without controls stay live');
+        assert(fx('fx-banner').inert, 'a live region with a control (the storage banner) is inert');
+        assert(!a.inert && !fx('fixture').inert, 'the dialog and its ancestors are not inert');
+        key('Tab');
+        assert(document.activeElement === fx('fx-a3'), 'Tab to a3');
+        key('Tab');
+        assert(document.activeElement === fx('fx-a1'), 'Tab wraps to a1, skipping the hidden button');
+        key('Tab', {shiftKey: true});
+        assert(document.activeElement === fx('fx-a3'), 'Shift+Tab wraps back');
+        document.activeElement.blur();
+        key('Tab');
+        assert(a.contains(document.activeElement), 'Tab from body comes back into the dialog');
+        let reached = false;
+        const probe = () => { reached = true; };
+        document.addEventListener('keydown', probe);
+        key('Escape');
+        key('k', {ctrlKey: true});
+        document.removeEventListener('keydown', probe);
+        assert(escaped === 1, 'Escape ran onEscape');
+        assert(!reached, 'Escape and shortcuts do not reach the page while a modal is open');
+        a.hidden = true;
+        m.close();
+        assert(!document.querySelector('#fixture [inert]') && !frame.inert, 'inert removed, the banner included');
+        assert(document.activeElement === fx('fx-opener'), 'focus restored to the opener');
+        reached = false;
+        document.addEventListener('keydown', probe);
+        key('Escape');
+        document.removeEventListener('keydown', probe);
+        assert(reached, 'Escape reaches the page again once closed');
+    });
+
+    h.test('dialog helper: a second modal stacks; closing it returns to the first', async () => {
+        fx('fx-opener').focus();
+        const a = fx('fx-a');
+        const b = fx('fx-b');
+        a.hidden = false;
+        const ma = dialogA11y.openModal(a, {onEscape: () => {}});
+        assert(document.activeElement === fx('fx-a1'), 'first control by default');
+        b.hidden = false;
+        const mb = dialogA11y.openModal(b, {onEscape: () => {}});
+        assert(document.activeElement === fx('fx-b1') && a.inert, 'b on top, a inert');
+        b.hidden = true;
+        mb.close();
+        assert(!a.inert && fx('fx-other').inert, 'a live again, the page still inert');
+        assert(document.activeElement === fx('fx-a1'), 'focus back in a');
+        a.hidden = true;
+        ma.close();
+        assert(!document.querySelector('#fixture [inert]'), 'nothing inert');
+        assert(document.activeElement === fx('fx-opener'), 'focus back on the opener');
+    });
+
+    h.test('dialog helper: an opener that is gone or hidden falls back', async () => {
+        const a = fx('fx-a');
+        const temp = document.createElement('button');
+        fx('fx-other').appendChild(temp);
+        temp.focus();
+        a.hidden = false;
+        const m = dialogA11y.openModal(a, {fallbackFocus: () => fx('fx-opener')});
+        temp.remove();
+        a.hidden = true;
+        m.close();
+        assert(document.activeElement === fx('fx-opener'), 'fell back to the given element');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

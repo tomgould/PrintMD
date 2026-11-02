@@ -1,0 +1,29 @@
+[Unit]
+Description=PrintMD PDF API (this machine only, 127.0.0.1:@PORT@)
+Documentation=file://@REPO@/server/README.md
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO@/server
+ExecStart=@NODE@ src/main.mjs --local
+Environment=PRINTMD_HOST=127.0.0.1
+Environment=PRINTMD_PORT=@PORT@
+# The browser starts on the first render and closes this many quiet seconds after the last one, so while
+# idle the service is only a small Node process (no browser, no tabs, no CPU).
+Environment=PRINTMD_BROWSER_IDLE_S=@IDLE@
+@CHROME_ENV@
+Restart=on-failure
+RestartSec=3
+# A render yields to the desktop: low priority, and a ceiling on memory and processes.
+Nice=10
+MemoryHigh=1G
+MemoryMax=2G
+TasksMax=512
+NoNewPrivileges=yes
+# Stopping the service stops every browser process it started.
+KillMode=control-group
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

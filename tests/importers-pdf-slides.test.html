@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF Importer Slides and Figures Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>PDF importer on slides, figures and line joins: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script type="module">
+    // A slide deck (untagged), a tagged PDF with images and a list broken across
+    // the page, and the line-join and clean-up helpers.
+    import * as pdfImport from '../js/pdf-import.js';
+    import * as md from '../js/markdown.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTERS_PDF_SLIDES');
+    md.configureMarked();
+
+    const imports = new Map();
+    /** Import a fixture once: {md, warnings, dom} where dom is the rendered preview. */
+    function load(name) {
+        if (!imports.has(name)) {
+            imports.set(name, (async () => {
+                const blob = await (await fetch('fixtures/' + name)).blob();
+                const warnings = [];
+                const out = await pdfImport.pdfToMarkdown(new File([blob], name, {type: 'application/pdf'}), null,
+                    {onWarning: (w) => warnings.push(w)});
+                const dom = document.createElement('div');
+                dom.innerHTML = md.renderMarkdown(out);
+                return {md: out, warnings, dom};
+            })());
+        }
+        return imports.get(name);
+    }
+    const texts = (dom, sel) => [...dom.querySelectorAll(sel)].map(e => e.textContent.replace(/\s+/g, ' ').trim());
+    const show = (s) => JSON.stringify(s.length > 600 ? s.slice(0, 600) + '…' : s);
+
+    // ── Slides ───────────────────────────────────────────────────────────────
+    h.test('slides: the title slide becomes the one-line H1', async () => {
+        const {md: out} = await load('slides.pdf');
+        assert(out.startsWith('# Example Co Widgets spring review for every shop\n'), 'start ' + show(out));
+        assert(out.includes('9th April 2026'), 'date lost');
+    });
+
+    h.test('slides: "●" bullets become list items, one per bullet', async () => {
+        const {md: out, dom} = await load('slides.pdf');
+        assert(!out.includes('●'), 'bullet glyph left in: ' + show(out));
+        assert(!dom.querySelector('pre'), 'a code block: ' + show(out));
+        const lists = [...dom.querySelectorAll('ul')].map(ul => texts(ul, 'li'));
+        assert(lists.length === 2 && lists[0].length === 5 && lists[1].length === 4, 'lists ' + JSON.stringify(lists));
+        assert(lists[0][0] === 'Sold four hundred garden widgets', 'first ' + JSON.stringify(lists[0][0]));
+        assert(lists[1][3] === 'Plan the autumn fair', 'last ' + JSON.stringify(lists[1][3]));
+        assert(JSON.stringify(texts(dom, 'h2')) === '["Spring results","Summer goals"]', 'slide titles ' + JSON.stringify(texts(dom, 'h2')));
+    });
+
+    // ── Tagged: figures and a list across the page ───────────────────────────
+    h.test('tagged: every image is reported, and a figure leaves a placeholder with its alt text', async () => {
+        const {md: out, dom, warnings} = await load('tagged-figures.pdf');
+        // A decorative image (alt="") is not in the structure tree, but the page still paints it.
+        assert(warnings.some(w => /^2 images not imported\b/.test(w)), 'warnings ' + JSON.stringify(warnings));
+        assert(out.split('*\\[image: Example chart\\]*').length === 2, 'figure placeholder, once: ' + show(out));
+        assert(!dom.querySelector('img'), 'an image with no source');
+    });
+
+    h.test('tagged: a list item broken across the page is one item, with no empty bullets', async () => {
+        const {md: out, dom} = await load('tagged-figures.pdf');
+        assert(!/^\s*[-*]\s*$/m.test(out), 'empty bullet: ' + show(out));
+        const items = texts(dom, 'li');
+        assert(items.length === 5, 'items ' + JSON.stringify(items));
+        assert(items[1].startsWith('Ut enim ad minim veniam') && items[1].includes('occaecat cupidatat') && items[1].endsWith('and ends here.'),
+            'item 2 split: ' + show(items[1]));
+    });
+
+    h.test('tagged: a hyphen at a line end joins without a space', async () => {
+        const {md: out} = await load('tagged-figures.pdf');
+        assert(out.includes('Every non-English page is skipped.'), show(out));
+    });
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    h.test('joinWrapped: hyphens at a line end, spaces otherwise', () => {
+        assert(typeof pdfImport.joinWrapped === 'function', 'joinWrapped is not exported');
+        const cases = [
+            [['non-', 'English page'], 'non-English page'],
+            [['a self-', 'contained unit'], 'a self-contained unit'],
+            [['inter-', 'national'], 'international'],
+            [['in-', 'formation'], 'information'],
+            [['read-', 'ers'], 'readers'],
+            [['high-', 'er'], 'higher'],
+            [['under-', 'stand'], 'understand'],
+            [['over-', 'all'], 'overall'],
+            [['self-', 'ish'], 'selfish'],
+            [['well-', 'known'], 'well-known'],
+            [['state-of-the-', 'art'], 'state-of-the-art'],
+            [['inter' + String.fromCharCode(0xad), 'national'], 'international'],
+            [['2020-', '2021'], '2020-2021'],
+            [['ends.', 'Next'], 'ends. Next'],
+            [['plain', 'words'], 'plain words'],
+            [['a dash -', 'here'], 'a dash - here'],
+            [['', 'only'], 'only'],
+        ];
+        for (const [[a, b], want] of cases) {
+            const got = pdfImport.joinWrapped(a, b);
+            assert(got === want, `${JSON.stringify([a, b])} -> ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+        }
+    });
+
+    h.test('postProcess keeps typographic quotes and still mends ligatures', () => {
+        const got = pdfImport.postProcess('# T\n\n“ﬁne” and ‘it’s’ soft­hyphen');
+        assert(got === '# T\n\n“fine” and ‘it’s’ softhyphen', JSON.stringify(got));
+    });
+
+    h.test('postProcess joins a line of spelled-out capitals instead of dropping it', () => {
+        const got = pdfImport.postProcess('# T\n\nW I D G E T S F O R A L L\n\nBody.');
+        assert(got === '# T\n\nWIDGETSFORALL\n\nBody.', JSON.stringify(got));
+    });
+
+    h.test('classifyLine: bullet glyphs, and no caps heading from digits or short labels', () => {
+        const line = (text, extra = {}) => ({text, fontSize: 12, isMono: false, x: 72, ...extra});
+        for (const b of ['● Item', '• Item', '▪ Item', '◦ Item', '– Item']) {
+            assert(pdfImport.classifyLine(line(b), 12, 72) === 'bullet', `${b}: ${pdfImport.classifyLine(line(b), 12, 72)}`);
+        }
+        for (const t of ['Q1 2026', 'NO.', 'ID', 'TOTAL 42']) {
+            assert(pdfImport.classifyLine(line(t), 12, 72) !== 'caps', `${t} became a caps heading`);
+        }
+        assert(pdfImport.classifyLine(line('SHOP FRONT'), 12, 72) === 'caps', 'a real caps label');
+        // List numbers run from 1 to 99: a year starting a line is prose.
+        for (const [t, want] of [['2026. The year the shop opened', 'para'], ['100. Not a step', 'para'], ['10. Item', 'numbered'],
+            ['1) Item', 'numbered'], ['99. Item', 'numbered']]) {
+            const got = pdfImport.classifyLine(line(t), 12, 72);
+            assert(got === want, `${t}: ${got}, want ${want}`);
+        }
+        // Indented text that starts with a capital is not a bullet on its own (a caption, a step).
+        assert(pdfImport.classifyLine(line('A caption under a picture', {x: 300}), 12, 72) === 'para', 'indented caption');
+    });
+
+    // The crowded-page growth check is in importers-pdf-growth.test.html.
+
+    h.run();
+</script>
+</body>
+</html>

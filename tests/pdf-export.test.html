@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF Export Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>pdf-export.js print window tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<!-- Same markup as index.html's #preflight-modal -->
+<div aria-modal="true" class="app-modal" hidden id="preflight-modal" role="alertdialog">
+    <div class="app-modal-backdrop" data-role="backdrop"></div>
+    <div class="app-modal-panel">
+        <h2>Check before exporting</h2>
+        <p data-role="message"></p>
+        <ul data-role="list"></ul>
+        <div data-role="actions"></div>
+    </div>
+</div>
+<button id="opener" type="button">opener</button>
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as pdfExport from '../js/pdf-export.js';
+    import * as preflight from '../js/preflight-dialog.js';
+    import * as imageCheck from '../js/image-check.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('PDFEXPORT');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    /**
+     * A stand-in for the window.open() popup. `completeOnClose` mimics a document
+     * that is fully loaded as soon as it is closed; otherwise the test fires load.
+     */
+    function makeFakeWindow({completeOnClose = false, autoLoad = false} = {}) {
+        const listeners = {};
+        const win = {
+            written: '', printed: 0, closedCalls: 0, closed: false,
+            document: {
+                readyState: 'loading',
+                fonts: {ready: Promise.resolve()},
+                open() {},
+                write(s) { win.written += s; },
+                close() {
+                    if (completeOnClose) this.readyState = 'complete';
+                    if (autoLoad) setTimeout(() => win.dispatch('load'), 10);
+                },
+            },
+            addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+            hasListener(type) { return (listeners[type] || []).length > 0; },
+            removeEventListener(type, fn) { listeners[type] = (listeners[type] || []).filter(f => f !== fn); },
+            dispatch(type) {
+                if (type === 'load') win.document.readyState = 'complete';
+                for (const fn of listeners[type] || []) fn({type});
+            },
+            focus() {},
+            print() { win.printed++; },
+            close() { win.closedCalls++; win.closed = true; },
+        };
+        return win;
+    }
+
+    const ENTRY = {manifest: {id: 'unbranded'}, styles: '.x{}'};
+    /** A prepareExport() result with this body and no cover. */
+    const prepared = (bodyHTML, coverHTML = '') => ({doc: {title: 'Doc'}, bodyHTML, coverHTML, pageOpts: {}});
+
+    function runExport(win, html = '<h1>Doc</h1><p>Body</p>') {
+        return pdfExport.exportPDF(prepared(html), ENTRY, {openWindow: () => win});
+    }
+
+    h.test('the print window HTML contains no inline script (CSP blocks it)', async () => {
+        const win = makeFakeWindow({completeOnClose: true, autoLoad: true});
+        await runExport(win);
+        assert(win.written.includes('<p>Body</p>'), 'document body written');
+        assert(!/<script/i.test(win.written), 'no <script> written into the print window');
+        assert(!/\son[a-z]+\s*=/i.test(win.written), 'no inline event handlers written');
+    });
+
+    /**
+     * Wait until the export listens for the window's load event. A fixed sleep raced
+     * a slow CI CPU: load fired before the listener existed and the export fell back
+     * to its 15 s cap.
+     */
+    async function untilListening(win) {
+        while (!win.hasListener('load')) await sleep(10);
+    }
+
+    h.test('print is triggered from the opener once the document has loaded', async () => {
+        const win = makeFakeWindow();
+        const done = runExport(win);
+        await untilListening(win);
+        await sleep(50);
+        assert(win.printed === 0, 'not printed before load');
+        win.dispatch('load');
+        await done;
+        assert(win.printed === 1, 'printed once after load, got ' + win.printed);
+    });
+
+    h.test('a document reporting readyState complete still waits for load', async () => {
+        const win = makeFakeWindow({completeOnClose: true});
+        const done = runExport(win);
+        await untilListening(win);
+        await sleep(50);
+        assert(win.printed === 0, 'not printed before load');
+        win.dispatch('load');
+        await done;
+        assert(win.printed === 1, 'printed once after load, got ' + win.printed);
+    });
+
+    h.test('print waits for a slow remote image in a real window', async () => {
+        // A same-origin iframe stands in for the popup (no user gesture needed).
+        // The image is on another origin (localhost vs 127.0.0.1), so it is not
+        // inlined and the window itself has to load it.
+        const frame = document.createElement('iframe');
+        frame.style.cssText = 'width:600px;height:400px;border:0;position:absolute;left:-9999px';
+        document.body.appendChild(frame);
+        const win = frame.contentWindow;
+        const src = `http://localhost:${location.port}/__slow/1200.png?r=${Math.random()}`;
+        let imageCompleteAtPrint = null;
+        win.print = () => {
+            const img = win.document.images[0];
+            imageCompleteAtPrint = !!img && img.complete && img.naturalWidth > 0;
+        };
+        try {
+            await pdfExport.exportPDF(prepared(`<p>x</p><img src="${src}" alt="slow">`), ENTRY, {openWindow: () => win});
+        } finally {
+            frame.remove();
+        }
+        assert(imageCompleteAtPrint === true, 'image loaded before print, got ' + imageCompleteAtPrint);
+    });
+
+    h.test('a lazy image below the fold is loaded before print', async () => {
+        const frame = document.createElement('iframe');
+        frame.style.cssText = 'width:600px;height:400px;border:0;position:absolute;left:-9999px';
+        document.body.appendChild(frame);
+        const win = frame.contentWindow;
+        const src = `http://localhost:${location.port}/__slow/300.png?r=${Math.random()}`;
+        let loadedAtPrint = null;
+        const started = performance.now();
+        let printedAfter = null;
+        win.print = () => {
+            printedAfter = performance.now() - started;
+            const img = win.document.images[0];
+            loadedAtPrint = !!img && img.complete && img.naturalWidth > 0;
+        };
+        try {
+            await pdfExport.exportPDF(prepared(`<div style="height:5000px">tall</div><img loading="lazy" src="${src}" alt="lazy">`), ENTRY, {openWindow: () => win});
+        } finally {
+            frame.remove();
+        }
+        assert(loadedAtPrint === true, 'lazy image loaded before print, got ' + loadedAtPrint);
+        // Well below the 15 s cap it must not wait for, with room for a slow CI CPU.
+        assert(printedAfter < 10000, 'printed without waiting for the cap: ' + Math.round(printedAfter) + 'ms');
+    });
+
+    h.test('the print window closes itself after printing', async () => {
+        const win = makeFakeWindow({completeOnClose: true, autoLoad: true});
+        await runExport(win);
+        win.dispatch('afterprint');
+        assert(win.closedCalls === 1, 'closed after afterprint');
+    });
+
+    h.test('a print window closed by the user before load is not printed', async () => {
+        const win = makeFakeWindow();
+        const done = runExport(win);
+        await sleep(20);
+        win.closed = true;
+        win.dispatch('load');
+        await done;
+        assert(win.printed === 0, 'not printed');
+    });
+
+    h.test('a blocked pop-up rejects with a message instead of an alert', async () => {
+        let err = null;
+        try {
+            await pdfExport.exportPDF(prepared('<p>x</p>'), ENTRY, {openWindow: () => null});
+        } catch (e) {
+            err = e;
+        }
+        assert(err && /pop-ups/i.test(err.message), 'rejected with a pop-up message, got ' + (err && err.message));
+    });
+
+    h.test('a failure after the window opened closes it and rejects', async () => {
+        const win = makeFakeWindow({autoLoad: true});
+        win.document.write = () => { throw new Error('write failed'); };
+        let err = null;
+        try {
+            await runExport(win);
+        } catch (e) {
+            err = e;
+        }
+        assert(err && err.message === 'write failed', 'error passed on, got ' + (err && err.message));
+        assert(win.closedCalls === 1, 'window closed, closedCalls=' + win.closedCalls);
+        assert(win.printed === 0, 'not printed');
+    });
+
+    h.test('an image fetch that hangs is abandoned after the timeout', async () => {
+        const realFetch = window.fetch;
+        const signals = [];
+        window.fetch = (url, init = {}) => {
+            if (!String(url).includes('hang')) return realFetch(url, init);
+            signals.push(init.signal);
+            return new Promise((_ok, fail) => {
+                if (init.signal) init.signal.addEventListener('abort', () => fail(new DOMException('aborted', 'AbortError')));
+            });
+        };
+        const win = makeFakeWindow({completeOnClose: true, autoLoad: true});
+        const started = performance.now();
+        try {
+            await pdfExport.exportPDF(prepared('<p><img src="/assets/hang.png" alt="h"></p>'), ENTRY,
+                {openWindow: () => win, imageTimeoutMs: 150});
+        } finally {
+            window.fetch = realFetch;
+        }
+        const took = performance.now() - started;
+        assert(signals.length === 1 && signals[0] && signals[0].aborted, 'fetch got a signal that was aborted');
+        // Below the 8 s default image timeout it must not fall back to, with room for a slow CI CPU.
+        assert(took < 6000, 'export finished soon after the timeout: ' + Math.round(took) + 'ms');
+        assert(win.written.includes('src="/assets/hang.png"'), 'image keeps its URL');
+        assert(win.printed === 1, 'still printed');
+    });
+
+    h.test('the image fetch timeout defaults to 8 seconds', () => {
+        assert(pdfExport.IMAGE_FETCH_TIMEOUT_MS === 8000, 'IMAGE_FETCH_TIMEOUT_MS = ' + pdfExport.IMAGE_FETCH_TIMEOUT_MS);
+    });
+
+    // ── Preflight dialog ────────────────────────────────────────────────────
+    const modal = document.getElementById('preflight-modal');
+
+    h.test('preflight dialog lists the warnings, focuses Cancel, Escape cancels', async () => {
+        const opener = document.getElementById('opener');
+        opener.focus();
+        const show = preflight.createPreflightDialog(modal);
+        const done = show(['No document title found', 'Second <b>warning</b>']);
+        assert(!modal.hidden, 'dialog shown');
+        const items = [...modal.querySelectorAll('[data-role="list"] li')].map(li => li.textContent);
+        assert(items.join('|') === 'No document title found|Second <b>warning</b>', 'warnings listed as text: ' + items.join('|'));
+        const buttons = [...modal.querySelectorAll('[data-role="actions"] button')];
+        assert(buttons.map(b => b.textContent).join('|') === 'Cancel|Export anyway', 'buttons: ' + buttons.map(b => b.textContent));
+        assert(document.activeElement === buttons[0], 'Cancel has focus');
+        modal.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+        assert(await done === 'cancel', 'Escape cancels');
+        assert(modal.hidden, 'dialog hidden');
+        assert(document.activeElement === opener, 'focus restored');
+    });
+
+    h.test('preflight dialog: Export anyway proceeds, Tab stays inside', async () => {
+        const show = preflight.createPreflightDialog(modal);
+        const done = show(['w']);
+        const buttons = [...modal.querySelectorAll('[data-role="actions"] button')];
+        modal.dispatchEvent(new KeyboardEvent('keydown', {key: 'Tab', bubbles: true}));
+        assert(document.activeElement === buttons[1], 'Tab moves to Export anyway');
+        modal.dispatchEvent(new KeyboardEvent('keydown', {key: 'Tab', bubbles: true}));
+        assert(document.activeElement === buttons[0], 'Tab wraps to Cancel');
+        buttons[1].click();
+        assert(await done === 'proceed', 'proceed');
+    });
+
+    h.test('preflight dialog: Escape still cancels after clicking the message text', async () => {
+        const show = preflight.createPreflightDialog(modal);
+        const done = show(['w']);
+        // Clicking plain text moves focus to <body>, outside the dialog.
+        modal.querySelector('[data-role="message"]').dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+        document.activeElement.blur();
+        assert(document.activeElement === document.body, 'focus left the dialog');
+        document.body.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+        const result = await Promise.race([done, sleep(300).then(() => 'still open')]);
+        assert(result === 'cancel', 'Escape from <body>: ' + result);
+        // Closed dialogs stop listening: Escape now reaches the page as usual.
+        let reached = false;
+        const probe = (e) => { if (e.key === 'Escape') reached = true; };
+        document.addEventListener('keydown', probe);
+        document.body.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+        document.removeEventListener('keydown', probe);
+        assert(reached, 'Escape after close is not swallowed');
+    });
+
+    /** Export into a hidden same-origin iframe; resolves to {result, printed, asked}. */
+    async function exportInFrame(entry, opts = {}) {
+        const frame = document.createElement('iframe');
+        frame.style.cssText = 'width:600px;height:400px;border:0;position:absolute;left:-9999px';
+        document.body.appendChild(frame);
+        const win = frame.contentWindow;
+        let printed = 0;
+        const asked = [];
+        win.print = () => { printed++; };
+        try {
+            const result = await pdfExport.exportPDF(prepared('<h1>Fonts</h1><p>Body text</p>'), entry, {
+                openWindow: () => win,
+                confirmPrint: (w, message) => { asked.push(message); return false; },
+                ...opts,
+            });
+            return {result, printed, asked};
+        } finally {
+            frame.remove();
+        }
+    }
+
+    const INTER_ENTRY = {manifest: {id: 'unbranded'}, styles: ".template-unbranded { font-family: 'Inter', sans-serif; }"};
+
+    h.test('fonts: a vendored face that does not load is named before printing, and Cancel stops the print', async () => {
+        const broken = "@font-face { font-family: 'Inter'; font-weight: 400; font-display: block; "
+            + `src: url("/vendor/fonts/missing-${Math.random().toString(36).slice(2)}.woff2") format("woff2"); }`;
+        const {result, printed, asked} = await exportInFrame(INTER_ENTRY, {fontCSS: broken});
+        assert(asked.length === 1, 'asked once, got ' + asked.length);
+        assert(/Font Inter 400 did not load/.test(asked[0]), 'names the face: ' + asked[0]);
+        assert(printed === 0, 'not printed after Cancel');
+        assert(result && result.printed === false && result.warnings.length === 1, JSON.stringify(result));
+    });
+
+    h.test('fonts: the vendored faces load and print without a question', async () => {
+        const {result, printed, asked} = await exportInFrame(INTER_ENTRY);
+        assert(asked.length === 0, 'no question: ' + asked.join(' | '));
+        assert(printed === 1, 'printed once, got ' + printed);
+        assert(result && result.printed === true, JSON.stringify(result));
+    });
+
+    h.test('images: the preflight list names an image under 150 ppi at its printed size, not a sharp one', async () => {
+        const png = (w, hgt) => {
+            const c = document.createElement('canvas');
+            c.width = w;
+            c.height = hgt;
+            c.getContext('2d').fillRect(0, 0, w, hgt);
+            return c.toDataURL('image/png');
+        };
+        const box = document.createElement('div');
+        box.id = 'ppi-preview';
+        box.style.cssText = 'width:700px;padding:0;position:absolute;left:-9999px';
+        box.innerHTML = `<p><img alt="small" width="576" src="${png(100, 60)}"></p>`
+            + `<p><img alt="wide" style="max-width:100%" src="${png(1200, 300)}"></p>`
+            + `<p><img alt="vector" width="576" src="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>')}"></p>`;
+        document.body.appendChild(box);
+        try {
+            await Promise.all(Array.from(box.querySelectorAll('img'), (img) => img.decode()));
+            const warnings = imageCheck.previewImageWarnings(box, {pageSize: 'A4', orientation: 'portrait', margin: '20mm'});
+            assert(warnings.length === 1, 'one warning: ' + JSON.stringify(warnings));
+            assert(warnings[0] === 'Image 1 is about 17 ppi at the size it prints; 150 or more prints sharply.', warnings[0]);
+        } finally {
+            box.remove();
+        }
+    });
+
+    // The in-app tests (the dialog before the pop-up, one window per export) are in
+    // pdf-export-app.test.html: booting the whole app is the heavy part.
+
+    h.run();
+</script>
+</body>
+</html>

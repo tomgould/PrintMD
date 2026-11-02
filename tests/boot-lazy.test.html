@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Boot loading Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>What loads early and what waits: template fonts, PowerPoint's library</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    import {createHarness, assert} from './lib/harness.js';
+    import {applyTemplate, getTemplates} from '../js/templates.js';
+    import {templateFaces} from '../js/fonts.js';
+    import {loadPptxGen} from '../js/import-utils.js';
+
+    const h = createHarness('BOOTLAZY');
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    async function waitFor(fn, what, ms = 6000) {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+            if (fn()) return;
+            await sleep(20);
+        }
+        throw new Error('timed out waiting for ' + what);
+    }
+    const requested = () => performance.getEntriesByType('resource').map((e) => e.name);
+    const native = (fn) => /\[native code\]/.test(Function.prototype.toString.call(fn));
+
+    h.test('applying a template starts fetching its fonts before any text uses them', async () => {
+        // Nothing on this page is set in the template's fonts: only the warm-up asks for them.
+        const entry = getTemplates()[0];
+        applyTemplate(entry);
+        const files = templateFaces(entry.styles).map((f) => f.file);
+        assert(files.length > 0, 'the template names vendored fonts');
+        await waitFor(() => files.every((file) => requested().some((u) => u.endsWith('/' + file))), 'every face of the template to be requested');
+        // (Unless the template itself names them: the public edition's default template is set in Source Serif Pro.)
+        const unrelated = requested().filter((u) => /source-serif-pro|noto-sans-symbols/.test(u)
+            && !files.some((file) => u.endsWith('/' + file)));
+        assert(unrelated.length === 0, 'no font of another template or the symbol fallbacks: ' + unrelated.join(', '));
+    });
+
+    h.test('a failed restore step is retried on the next PowerPoint export, so trim and parseInt end up native', async () => {
+        // By identity: core-js makes its replacements' toString look native.
+        const orig = {trim: String.prototype.trim, trimEnd: String.prototype.trimEnd, parseInt: window.parseInt, parseFloat: Number.parseFloat};
+        const isOrig = () => String.prototype.trim === orig.trim && String.prototype.trimEnd === orig.trimEnd
+            && window.parseInt === orig.parseInt && Number.parseFloat === orig.parseFloat;
+        assert(native(orig.trim) && native(orig.parseInt), 'native before');
+        // The first request for builtins-restore.js fails (a dropped connection).
+        const realAppend = document.head.appendChild.bind(document.head);
+        let failed = 0;
+        document.head.appendChild = (el) => {
+            if (el.tagName === 'SCRIPT' && el.src.endsWith('/js/builtins-restore.js') && failed === 0) {
+                failed++;
+                el.src = el.src.replace('builtins-restore.js', 'builtins-restore-missing.js');
+            }
+            return realAppend(el);
+        };
+        try {
+            let error = null;
+            try { await loadPptxGen(); } catch (e) { error = e; }
+            assert(error && failed === 1, 'the first export fails with the restore step: ' + (error && error.message));
+            assert(typeof window.PptxGenJS === 'function', 'PptxGenJS itself loaded');
+            assert(!isOrig(), 'core-js replaced the built-ins (the case this guards against)');
+            await loadPptxGen();
+            assert(isOrig(), 'the retry put the browser\'s own trim, trimEnd, parseInt and parseFloat back');
+            assert(!(Symbol.for('printmd.native-builtins') in window), 'the saved copies were cleared');
+            assert(await loadPptxGen() === window.PptxGenJS, 'later calls are immediate');
+        } finally {
+            document.head.appendChild = realAppend;
+        }
+    });
+
+    h.run();
+</script>
+</body>
+</html>

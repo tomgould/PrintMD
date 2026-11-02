@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF Importer Rule Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>PDF importer rules: fonts, links, tables, columns, numbers: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script type="module">
+    // Small rules of the untagged path (and the code-span rule of the tagged one), on
+    // unit inputs and on PDFs built here from positioned text (standard fonts, invented text).
+    import * as pdfImport from '../js/pdf-import.js';
+    import * as md from '../js/markdown.js';
+    import {createHarness, assert} from './lib/harness.js';
+    import * as growth from './lib/growth.js';
+
+    const h = createHarness('IMPORTERS_PDF_RULES');
+    md.configureMarked();
+
+    /**
+     * An untagged one-page PDF from positioned text: each item is [font, size, x, y, text],
+     * font 'S' (Helvetica) or 'M' (Courier); y is measured from the bottom of the page.
+     */
+    function textPdf(items) {
+        const esc = (s) => s.replace(/[\\()]/g, '\\$&');
+        const stream = items.map(([f, size, x, y, t]) => `BT /${f} ${size} Tf ${x} ${y} Td (${esc(t)}) Tj ET`).join('\n');
+        const objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [5 0 R] /Count 1 >>',
+            '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>',
+            '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /S 3 0 R /M 4 0 R >> >> >>',
+            `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];
+        let out = '%PDF-1.4\n';
+        const offs = [];
+        objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+        const xref = out.length;
+        out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+        out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+        return new File([out], 'rules.pdf', {type: 'application/pdf'});
+    }
+    const render = (markdown) => {
+        const dom = document.createElement('div');
+        dom.innerHTML = md.renderMarkdown(markdown);
+        return dom;
+    };
+    const texts = (dom, sel) => [...dom.querySelectorAll(sel)].map(e => e.textContent.replace(/\s+/g, ' ').trim());
+    const show = (s) => JSON.stringify(s.length > 600 ? s.slice(0, 600) + '…' : s);
+    const title = [['S', 22, 72, 740, 'Widget Notes']];
+
+    // ── Fonts ────────────────────────────────────────────────────────────────
+    h.test('fontFlags: only fixed-pitch families are monospaced, whole words of the name', () => {
+        for (const name of ['ABCDEF+ArialUnicodeMS', 'LucidaSansUnicode', 'EncodeSans-Regular', 'Codec-Pro', 'MonotypeCorsiva',
+            'AmericanTypewriter', 'Hackney-Bold', 'Inter-Regular', 'SourceSerifPro-It']) {
+            assert(!pdfImport.fontFlags(name, 'sans-serif').mono, `${name} taken for monospace`);
+        }
+        for (const name of ['Courier', 'CourierNewPSMT', 'ABCDEF+DejaVuSansMono', 'Consolas-Bold', 'Menlo-Regular', 'Monaco',
+            'FiraCode-Retina', 'JetBrainsMono-Regular', 'SourceCodePro-Regular', 'IBMPlexMono', 'SFMono-Regular', 'LucidaConsole',
+            'AndaleMono', 'Hack-Regular', 'Inconsolata', 'LiberationMono', 'Cousine', 'CascadiaCode', 'AnonymousPro', 'RobotoMono',
+            'UbuntuMono', 'NotoSansMono-Regular']) {
+            assert(pdfImport.fontFlags(name, 'sans-serif').mono, `${name} not taken for monospace`);
+        }
+        assert(pdfImport.fontFlags('', 'monospace').mono, 'the fixed-pitch flag alone');
+        assert(pdfImport.fontFlags('Inter-Bold').bold && pdfImport.fontFlags('SourceSerifPro-It').italic, 'bold and italic');
+    });
+
+    h.test('identifyMonoFonts: a font with no name is judged by its widths', () => {
+        const words = ['alpha', 'bravo two', 'charlie', 'delta four', 'echo', 'foxtrot six', 'golf'];
+        const item = (fontName, str, width, named) => ({fontName, str, width, scaleX: 1, mono: false, named});
+        const items = [];
+        for (const w of words) {
+            items.push(item('even', w, w.length * 6, false));                       // every character 6pt wide
+            items.push(item('uneven', w, w.length * 6 * (1 + (w.length % 3) * 0.3), false));
+            items.push(item('named', w, w.length * 6, true));                        // even widths, but a real proportional name
+        }
+        const mono = pdfImport.identifyMonoFonts([{items}]);
+        assert(mono.has('even'), 'an unnamed fixed-width font was not found');
+        assert(!mono.has('uneven'), 'an unnamed proportional font was taken for monospace');
+        assert(!mono.has('named'), 'a named proportional font was judged by its widths');
+    });
+
+    // ── Links ────────────────────────────────────────────────────────────────
+    h.test('linkRanges: a link box that cuts into words takes the whole words', () => {
+        const str = 'read the HANDBOOK today';
+        const item = {str, x: 0, width: 230, fontSize: 10, pageY: 100, dir: 'ltr'};
+        // A box placed as if every character were as wide: it starts inside "HANDBOOK" and ends before its last letter.
+        const box = {url: 'https://example.com/h', x1: (9 / 23) * 230, x2: (17 / 23) * 230, top: 90, bottom: 102};
+        const ranges = pdfImport.linkRanges(item, [box]);
+        assert(ranges && ranges.length === 1, 'ranges ' + JSON.stringify(ranges));
+        assert(str.slice(ranges[0].s, ranges[0].e) === 'HANDBOOK', 'linked ' + JSON.stringify(str.slice(ranges[0].s, ranges[0].e)));
+        assert(pdfImport.linkRanges(item, [{...box, top: 300, bottom: 310}]) === null, 'a box on another line');
+    });
+
+    // ── Tables ───────────────────────────────────────────────────────────────
+    h.test('tables: a wrapped row does not swallow the rows after it', async () => {
+        const out = await pdfImport.pdfToMarkdown(textPdf([...title,
+            ['S', 10, 72, 690, 'Name'], ['S', 10, 220, 690, 'Notes'],
+            ['S', 10, 72, 668, 'Alpha'], ['S', 10, 220, 668, 'first line of a long'],
+            ['S', 10, 72, 656, 'one'], ['S', 10, 220, 656, 'note that wraps'],
+            ['S', 10, 72, 634, 'Beta'], ['S', 10, 220, 634, 'Gamma'],
+            ['S', 10, 72, 612, 'Delta'], ['S', 10, 220, 612, 'Epsilon'],
+            ['S', 10, 72, 590, 'Zeta'], ['S', 10, 220, 590, 'Eta']]));
+        const table = render(out).querySelector('table');
+        assert(table, 'no table: ' + show(out));
+        const rows = [...table.querySelectorAll('tbody tr')].map(tr => texts(tr, 'td'));
+        assert(JSON.stringify(rows) === JSON.stringify([['Alpha one', 'first line of a long note that wraps'], ['Beta', 'Gamma'],
+            ['Delta', 'Epsilon'], ['Zeta', 'Eta']]), 'rows ' + JSON.stringify(rows));
+    });
+
+    h.test('tables: a ragged column keeps its cells, wherever each one starts', async () => {
+        const out = await pdfImport.pdfToMarkdown(textPdf([...title,
+            ['S', 10, 72, 690, 'Shelf'], ['S', 10, 240, 690, 'Stock'],
+            ['S', 10, 72, 668, 'North'], ['S', 10, 240, 668, 'twelve boxes'],
+            ['S', 10, 72, 646, 'South'], ['S', 10, 222, 646, 'nine boxes and a crate'],
+            ['S', 10, 72, 624, 'East'], ['S', 10, 252, 624, 'empty'],
+            ['S', 10, 72, 602, 'West'], ['S', 10, 231, 602, 'four boxes']]));
+        const table = render(out).querySelector('table');
+        assert(table, 'no table: ' + show(out));
+        const rows = [...table.querySelectorAll('tbody tr')].map(tr => texts(tr, 'td'));
+        assert(JSON.stringify(rows) === JSON.stringify([['North', 'twelve boxes'], ['South', 'nine boxes and a crate'],
+            ['East', 'empty'], ['West', 'four boxes']]), 'rows ' + JSON.stringify(rows));
+    });
+
+    h.test('columns: code beside prose is a code block, not a table', async () => {
+        const prose = ['The shelf opener takes a room', 'and a rack, then hands back', 'a shelf that widgets can be', 'painted and labelled on.',
+            'Each call checks the driver', 'first and stops if it is gone.'];
+        // [indent in characters, text]: Courier 9pt is 5.4pt a character, so the indent is drawn as an x offset.
+        const code = [[0, '$shelf = Shelf::open('], [4, 'room: "north",'], [4, 'rack: "r7"'], [0, ');'], [0, '$shelf->paint($widget);'],
+            [0, '$shelf->close();']];
+        const items = [...title];
+        prose.forEach((t, k) => items.push(['S', 10, 72, 690 - k * 14, t]));
+        code.forEach(([indent, t], k) => items.push(['M', 9, 330 + indent * 5.4, 690 - k * 14, t]));
+        const out = await pdfImport.pdfToMarkdown(textPdf(items));
+        const dom = render(out);
+        assert(!dom.querySelector('table'), 'came out as a table: ' + show(out));
+        const pre = texts(dom, 'pre')[0] || '';
+        assert(pre.includes('$shelf = Shelf::open( room: "north",') && pre.includes('$shelf->close();'), 'code ' + show(out));
+        assert(out.includes('\n    room: "north",\n'), 'code indentation lost: ' + show(out));
+        assert(texts(dom, 'p').some(p => p.startsWith('The shelf opener takes a room and a rack')), 'prose ' + show(out));
+    });
+
+    // ── Numbers, punctuation ─────────────────────────────────────────────────
+    h.test('numbers: a year starting a line, or a number carrying on a sentence, stays prose', async () => {
+        const out = await pdfImport.pdfToMarkdown(textPdf([...title,
+            ['S', 10, 72, 690, 'The shop opened its doors in the spring of'],
+            ['S', 10, 72, 676, '2026. The first customers bought garden widgets.'],
+            ['S', 10, 72, 648, 'Stock is counted on the shelves marked with row'],
+            ['S', 10, 72, 634, '12. The count happens every Friday morning.'],
+            ['S', 10, 72, 606, 'Do these in order.'],
+            ['S', 10, 72, 592, '10. Open the store'],
+            ['S', 10, 72, 578, '11. Count the boxes']]));
+        const dom = render(out);
+        const paras = texts(dom, 'p');
+        assert(paras.some(p => p.includes('spring of 2026. The first customers')), 'year lost: ' + show(out));
+        assert(paras.some(p => p.includes('marked with row 12. The count')), 'sentence cut: ' + show(out));
+        assert(JSON.stringify(texts(dom, 'li')) === '["Open the store","Count the boxes"]', 'steps ' + JSON.stringify(texts(dom, 'li')));
+    });
+
+    // ── Letter-spaced capitals ───────────────────────────────────────────────
+    /** Helvetica's capital widths, in thousandths of an em. */
+    const HELVETICA = {A: 667, B: 667, E: 667, H: 722, I: 278, L: 556, N: 722, O: 778, R: 722, S: 667, T: 611, U: 722};
+    /** Capitals drawn one at a time with tracking, a wider gap between words: [font, size, x, y, letter] items. */
+    function tracked(words, size, y, tracking, wordGap) {
+        const items = [];
+        let x = 72;
+        for (const w of words) {
+            for (const c of w) {
+                items.push(['S', size, x.toFixed(2), y, c]);
+                x += (size * HELVETICA[c]) / 1000 + tracking;
+            }
+            x += wordGap;
+        }
+        return items;
+    }
+
+    h.test('letter-spaced capitals are joined into words, never dropped', async () => {
+        const out = await pdfImport.pdfToMarkdown(textPdf([...title,
+            ...tracked(['NORTH', 'STORE'], 16, 700, 4, 16),            // a heading, words apart
+            ...tracked(['BUILT', 'TO', 'LAST'], 10, 670, 3, 12),        // a tagline, words apart
+            ['S', 10, 72, 640, 'S T O C K R O O M'],                    // no word gap to go by: one run
+            ['S', 10, 72, 610, 'Body text follows the tagline and the label above it.']]));
+        assert(/\n#{1,3} NORTH STORE\n/.test(out), 'heading ' + show(out));
+        assert(out.includes('\nBUILT TO LAST\n'), 'tagline ' + show(out));
+        assert(out.includes('\nSTOCKROOM\n'), 'label ' + show(out));
+        assert(!/(?:^|\n)(?:[A-Z] ){2,}[A-Z]/.test(out), 'letters left spaced: ' + show(out));
+    });
+
+    h.test('spacedCapsText: word breaks from space items or wider gaps, else one run', () => {
+        const it = (str, x, width) => ({str, x, width});
+        assert(pdfImport.spacedCapsText([it('N O R T H', 72, 50), it(' ', 122, 14), it('S T O R E', 136, 50)]) === 'NORTH STORE', 'space item');
+        assert(pdfImport.spacedCapsText([it('A', 0, 7), it('B', 10, 7), it('C', 20, 7), it('D', 37, 7), it('E', 47, 7)]) === 'ABC DE', 'wide gap');
+        assert(pdfImport.spacedCapsText([it('E X A M P L E C O', 0, 90)]) === 'EXAMPLECO', 'no breaks to go by');
+        assert(pdfImport.isSpacedCaps('N O R T H') && !pdfImport.isSpacedCaps('NORTH STORE') && !pdfImport.isSpacedCaps('A B'), 'isSpacedCaps');
+    });
+
+    h.test('inline code: no space between a code span and the punctuation after it', async () => {
+        const out = await pdfImport.pdfToMarkdown(textPdf([...title,
+            ['S', 10, 72, 690, 'See'], ['M', 10, 94, 690, 'widget.ts'], ['S', 10, 152, 690, ', then read'], ['M', 10, 205, 690, 'shelf.ts'],
+            ['S', 10, 257, 690, '.']]));
+        assert(out.includes('See `widget.ts`, then read `shelf.ts`.'), show(out));
+    });
+
+    /**
+     * A tagged one-page PDF: an H1, then one P per entry of `paras`. Each paragraph is a list
+     * of [text] (Helvetica, in the P) or [text, 'Code'] (Courier, in a Code element), on one line.
+     */
+    function taggedPdf(heading, paras) {
+        const esc = (s) => s.replace(/[\\()]/g, '\\$&');
+        const objs = [];
+        const add = (o) => { objs.push(o); return objs.length; };
+        // Fixed objects first: 1 catalog, 2 pages, 3 page, 4 contents, 5 Helvetica, 6 Courier, 7 root, 8 Document, 9 parent tree.
+        for (let i = 0; i < 9; i++) add('');
+        const parents = [];   // MCID -> struct element object number
+        const lines = [];
+        const mark = (tag, elem, font, size, x, y, text) => {
+            const mcid = parents.length;
+            parents.push(elem);
+            lines.push(`/${tag} <</MCID ${mcid}>> BDC BT /${font} ${size} Tf ${x} ${y} Td (${esc(text)}) Tj ET EMC`);
+            return mcid;
+        };
+        const h1 = add('');
+        objs[h1 - 1] = `<< /Type /StructElem /S /H1 /P 8 0 R /Pg 3 0 R /K ${mark('H1', h1, 'S', 22, 72, 740, heading)} >>`;
+        const kids = [h1];
+        paras.forEach((runs, i) => {
+            const p = add('');
+            const y = 690 - i * 30;
+            let x = 72;
+            const k = runs.map(([text, role]) => {
+                const at = x;
+                x += text.length * 6;
+                if (role !== 'Code') return String(mark('P', p, 'S', 10, at, y, text));
+                const c = add('');
+                objs[c - 1] = `<< /Type /StructElem /S /Code /P ${p} 0 R /Pg 3 0 R /K ${mark('Code', c, 'M', 10, at, y, text)} >>`;
+                return `${c} 0 R`;
+            });
+            objs[p - 1] = `<< /Type /StructElem /S /P /P 8 0 R /Pg 3 0 R /K [${k.join(' ')}] >>`;
+            kids.push(p);
+        });
+        const stream = lines.join('\n');
+        objs[0] = '<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 7 0 R >>';
+        objs[1] = '<< /Type /Pages /Kids [3 0 R] /Count 1 >>';
+        objs[2] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /StructParents 0 '
+            + '/Resources << /Font << /S 5 0 R /M 6 0 R >> >> >>';
+        objs[3] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+        objs[4] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+        objs[5] = '<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>';
+        objs[6] = '<< /Type /StructTreeRoot /K [8 0 R] /ParentTree 9 0 R >>';
+        objs[7] = `<< /Type /StructElem /S /Document /P 7 0 R /K [${kids.map((n) => `${n} 0 R`).join(' ')}] >>`;
+        objs[8] = `<< /Nums [0 [${parents.map((n) => `${n} 0 R`).join(' ')}]] >>`;
+        let out = '%PDF-1.4\n';
+        const offs = [];
+        objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+        const xref = out.length;
+        out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+        out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+        return new File([out], 'tagged-rules.pdf', {type: 'application/pdf'});
+    }
+
+    h.test('inline code, tagged: no space between a code span and the punctuation after it', async () => {
+        const out = await pdfImport.pdfToMarkdown(taggedPdf('Widget Notes', [
+            [['See '], ['widget.ts', 'Code'], [' , then read '], ['shelf.ts', 'Code'], [' .']],
+            [['Call '], ['open()', 'Code'], [' ; it returns '], ['true', 'Code'], [' !']],
+            // Punctuation that starts a word is not padding: the space stays.
+            [['Copy the '], ['sample', 'Code'], [' .env file and '], ['run', 'Code'], [' , then stop.']],
+            // An opening bracket after code is a new word, not padding; a closing one is padding.
+            [['Use '], ['open', 'Code'], [' (see below) or '], ['shut', 'Code'], [' ) here.']],
+        ]));
+        assert(out.includes('Use `open` (see below) or `shut`) here.'), show(out));
+        assert(/^# Widget Notes$/m.test(out), 'read by the tagged path (the H1 element): ' + show(out));
+        assert(out.includes('See `widget.ts`, then read `shelf.ts`.'), show(out));
+        assert(out.includes('Call `open()`; it returns `true`!'), show(out));
+        assert(out.includes('Copy the `sample` .env file and `run`, then stop.'), show(out));
+    });
+
+    h.test('the code-span punctuation rule is linear on hostile input', async () => {
+        for (const [given, want] of [['`a` , b', '`a`, b'], ['`a` ( b', '`a` ( b'], ['`a` (b)', '`a` (b)'],
+            ['`a`(b)', '`a`(b)'], ['`a` )', '`a`)'], ['`a` .b', '`a` .b'], ['\\` .', '\\` .']]) {
+            assert(pdfImport.tightenAfterCode(given) === want, `${JSON.stringify(given)}: ${JSON.stringify(pdfImport.tightenAfterCode(given))}`);
+        }
+        for (const [label, make] of [['backticks', (n) => 'a' + '`'.repeat(n) + ' x'],
+            ['"a` ," repeated', (n) => 'a` ,'.repeat(Math.floor(n / 4))], ['"a`" repeated', (n) => 'a`'.repeat(Math.floor(n / 2))]]) {
+            const problem = await growth.checkLinear((s) => pdfImport.tightenAfterCode(s), make, {n: 1 << 15, capMs: 5000});
+            assert(problem === null, `${label}: ${problem}`);
+        }
+    });
+
+    h.run();
+</script>
+</body>
+</html>
