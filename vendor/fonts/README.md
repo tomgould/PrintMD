@@ -21,20 +21,18 @@ rules (`fontFaceCSS()`). `server/test/fonts.test.mjs` checks with `pdffonts` tha
 | `lora/`             | `Lora`             | 500, 600, 700; italic 500 (every weight)          | `@fontsource/lora` 5.3.0 (Reserved Font Name "Lora": used unmodified) | OFL-1.1 |
 | `dm-sans/`          | `DM Sans`          | 400, 500, 700                                     | `@fontsource/dm-sans` 5.3.0        | OFL-1.1 |
 
-The eight rows from `figtree/` down, and Inter's two italics, are the fonts of the new templates (README, Fonts for
-templates; ROADMAP Milestone 10), only the weights those templates use: 1,127,024 bytes (1,101 KB) of woff2 for latin
-and latin-ext together, of which the latin files are 647 KB. A browser fetches a family only for a template that
-names it, and latin-ext only for text that uses it, so the existing templates load nothing more. Each package was
-fetched with `npm pack @fontsource/<family>@5.3.0` and its sha512 checked against the registry's `dist.integrity`
-before the files were copied; every `unicode-range` matches the package CSS (the standard latin and latin-ext
-ranges in `js/fonts.js`).
+The shipped templates use Source Serif Pro, Inter and Source Code Pro (`unbranded`) and Libre Caslon Text, Schibsted
+Grotesk and Source Code Pro (`dealmobile`). The other families are there for templates of your own, in the weights
+listed. A browser fetches a family only for a template that names it, and latin-ext only for text that uses it, so a
+family no template names costs nothing. Each Fontsource package is the `npm pack @fontsource/<family>@5.3.0` file,
+its sha512 checked against the registry's `dist.integrity`; every `unicode-range` matches the package CSS (the
+standard latin and latin-ext ranges in `js/fonts.js`).
 
 - A family whose only italic is one weight declares it for every weight (`font-weight: 100 900`), as the symbol
   fallbacks do, so bold italic text uses it as it is instead of a synthesised bold (a Type 3 font).
-- `Inter` has true italics: 400 italic for weights up to 500 and 700 italic for the bolder ones. Before them an Inter
-  italic printed as the roman, slanted. In the existing templates this changes only italic text set in Inter (the
-  unbranded template's headings and tables): `markdown-showcase.md` prints the same pages, with `Inter-Italic` and
-  `Inter-BoldItalic` on three of them.
+- `Inter` has true italics: 400 italic for weights up to 500 and 700 italic for the bolder ones, so italic text set in
+  Inter (the unbranded template's headings and tables) prints as `Inter-Italic` and `Inter-BoldItalic`, not a
+  slanted roman.
 - Fontsource packaging gives some faces odd internal names, which a PDF shows: every Figtree weight is named
   "Figtree Light" (a PDF lists `FigtreeLight-Bold` for bold; the outlines are the right weight), DM Sans is the
   "DM Sans 9pt" optical size (`DMSans9pt-Regular`). The print-quality check (`server/qa/pdf-qa.mjs`

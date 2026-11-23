@@ -6,8 +6,7 @@
  * copes with a missing author, date or subject, the running head and foot, the
  * fonts it names, the print rules a template must keep (no blurred shadows, no
  * filters), the contrast of its colours and its manifest entry. The PDFs
- * themselves are checked with server/qa/pdf-qa.mjs (README, Checklist for a
- * new template).
+ * themselves are checked with server/qa/pdf-qa.mjs.
  *
  * Kept out of the core manifest in some builds, like the template.
  * Run: node --test tests/template-dealmobile.test.mjs
@@ -138,7 +137,7 @@ test('dealmobile: colours meet contrast on white and on the code paper', () => {
 });
 
 test('dealmobile: listed in a manifest with a description and its page sizes (under "New" in a layer manifest)', () => {
-    // A build with an extra template layer may list it there; otherwise the core manifest lists it.
+    // A templates/manifest.company.json layer may list it; otherwise the core manifest does.
     const companyFile = join(ROOT, 'templates/manifest.company.json');
     const file = existsSync(companyFile) ? companyFile : join(ROOT, 'templates/manifest.core.json');
     const entry = JSON.parse(readFileSync(file, 'utf8')).templates.find((t) => t.id === ID);

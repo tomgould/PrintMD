@@ -17,13 +17,11 @@
  *   4. tests/office-convert.mjs        (the Word and PowerPoint fixtures opened in LibreOffice),
  *      only when soffice, pdftotext and pdfinfo are on PATH; otherwise "office: skipped"
  *   5. node --test server/test/*.test.mjs   (the PDF API and the print-quality QA), only when
- *      server/ can load its dependencies (server/node_modules, or the CI image's /node_modules)
+ *      server/ can load its dependencies (server/node_modules, or a node_modules folder above it)
  *      and poppler-utils is on PATH; otherwise a "server: skipped" line says what is missing
  *
- * The CI image (deploy/ci/Dockerfile) has Chromium, poppler-utils and the server's
- * dependencies, so there only the office suite (LibreOffice) is skipped, and the server
- * suite runs its print-quality gate only (tests/lib/server-tests.mjs; SERVER_TESTS=all runs
- * every file, one at a time).
+ * With CI set, the server suite runs its print-quality gate only, one file at a time
+ * (tests/lib/server-tests.mjs; SERVER_TESTS=all runs every file).
  *
  * Usage: node tests/run-all.mjs [filter...]
  *   With filter words, only suites whose name contains one of them run
@@ -176,7 +174,7 @@ if (wanted('office')) {
 
 /**
  * Whether server/ can load its dependencies: server/node_modules, or any
- * node_modules Node finds above it (the CI image installs them at /node_modules).
+ * node_modules Node finds above it.
  */
 function serverDepsInstalled() {
     if (existsSync(resolve(root, 'server/node_modules'))) return true;

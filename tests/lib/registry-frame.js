@@ -40,7 +40,7 @@ window.fetch = (input, init) => {
     if (LAYER[which] && /\/templates\/manifest\.(?!core\.)[a-z0-9-]+\.json$/.test(url.pathname)) return LAYER[which](init);
     if (CORE[which] && url.pathname.endsWith('/templates/manifest.core.json')) return CORE[which](init);
     if (LAYER[which] && url.pathname.endsWith('/templates/manifest.core.json')) {
-        // An edition whose core manifest names no layer (the public one) gets one here, so the layer cases have something to answer.
+        // A core manifest that names no layer gets one here, so the layer cases have something to answer.
         return realFetch(input, init).then(async (response) => {
             const core = await response.json();
             return json(core.layers && core.layers.length ? core : {...core, layers: ['templates/manifest.fixture.json']});

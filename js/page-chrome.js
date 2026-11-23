@@ -4,8 +4,8 @@
  * page margins of every body page through CSS @page margin boxes, with the page
  * number as "n of N" from counter(page) and counter(pages). Never on a cover.
  *
- * A template opts in with optional fields on its default export (README,
- * Template contract):
+ * A template opts in with optional fields on its default export (js/templates.js
+ * has the whole contract):
  *   runningHead:  {left?, centre?, right?}   text with tokens {title} {author}
  *   runningFoot:  {left?, centre?, right?}   {date} {subject} {page} {pages}
  *   runningStyle: {fontFamily, fontSize, fontWeight, fontStyle, color}

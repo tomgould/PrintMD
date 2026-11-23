@@ -15,8 +15,8 @@ import {
 import {getTemplates, getTemplateById, getTemplateWarnings} from '../js/templates.js';
 
 const ROOT = new URL('../', import.meta.url);
-// A build may add a template layer; this one ships none, so the tests that answer the layer
-// manifest in odd ways have nothing to exercise here.
+// The core manifest names no template layer, so the tests that answer the layer manifest in odd
+// ways are skipped unless one is added.
 const HAS_LAYER = (JSON.parse(readFileSync(new URL(CORE_MANIFEST, ROOT), 'utf8')).layers || []).length > 0;
 const NO_LAYER = HAS_LAYER ? false : 'this edition has no template layer';
 const good = (templates, extra = {}) => JSON.stringify({templates, ...extra});

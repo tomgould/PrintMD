@@ -66,7 +66,7 @@
     // Words that must print unbroken (each inside a narrow table column).
     const words = ['Component', 'Responsibility', 'Implementation', 'Internationalisation', 'Accessibility', 'Configuration'];
 
-    // ?layout=continuous: one continuous page (README, Export: Page options), with a block far wider than
+    // ?layout=continuous: one continuous page (js/export-options.js), with a block far wider than
     // the page (Chromium shrinks such a print) and a last line to find; tests/print-pdf.mjs runs the
     // print window's layout step (js/page-layout.js) before it prints.
     const continuous = new URLSearchParams(location.search).get('layout') === 'continuous';

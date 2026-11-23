@@ -1,5 +1,5 @@
 /**
- * The print-quality rules of the API's render (README, Print quality): fonts
+ * The print-quality rules of the API's render: fonts
  * confirmed before printing, image resolution, PDF metadata and structure,
  * the nearly-empty-last-page tidy and printed link addresses.
  */

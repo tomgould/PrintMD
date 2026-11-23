@@ -255,7 +255,7 @@ test('export modules are pure: no document or window use, importable in Node', a
 });
 
 // -----------------------------------------------------------------------------
-// Template manifests declare page margin (M1-T1)
+// Template manifests declare page margin
 // -----------------------------------------------------------------------------
 
 // Every template in the registry (templates/manifest.*.json), never by name.
@@ -466,7 +466,7 @@ test('splitIntoSlides: standalone h1', () => {
 });
 
 // -----------------------------------------------------------------------------
-// buildDocxHtml: legacy compat passthrough (M1-T4)
+// buildDocxHtml: legacy compat passthrough
 // -----------------------------------------------------------------------------
 
 test('buildDocxHtml: returns the renderedHTML unchanged', () => {
@@ -647,7 +647,7 @@ test('isoDay: cover dates and ISO dates become YYYY-MM-DD, anything else is empt
 });
 
 // -----------------------------------------------------------------------------
-// pptxBlocksFromHtml: pure HTML-to-block converter (M1-T5)
+// pptxBlocksFromHtml: pure HTML-to-block converter
 // -----------------------------------------------------------------------------
 
 test('pptxBlocksFromHtml: empty string returns []', () => {

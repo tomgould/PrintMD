@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the PrintMD PDF API as a systemd USER service: it starts when you log in (and at boot when
 # lingering is on), listens on 127.0.0.1 only, and costs nothing while idle (the browser closes when there
-# is nothing to render). No root, no container. For macOS see "Run it as a service" in server/README.md.
+# is nothing to render). No root, no container. Elsewhere, run: npm --prefix server run start:local
 #
 #   server/service/install-service.sh [options]
 #

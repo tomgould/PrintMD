@@ -662,7 +662,7 @@ function inertRoot(html) {
 
 /**
  * How many images the Word file leaves out: every <img> with a source, a data:
- * URI or a web address alike, since none is embedded (roadmap M8-T15).
+ * URI or a web address alike, since none is embedded.
  * @param {string|Element} html  rendered body HTML, or an element already holding it
  */
 export function countWordImages(html) {

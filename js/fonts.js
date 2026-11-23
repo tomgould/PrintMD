@@ -57,7 +57,7 @@ const STYLES = [
     ['Source Serif Pro', 400, 'italic', 'source-serif-pro'],
     // Bold italic text would otherwise be a synthesised bold, which Chrome prints as a Type 3 font.
     ['Source Serif Pro', 700, 'italic', 'source-serif-pro'],
-    // The new templates' families: only the weights they use (README, Fonts).
+    // More families a template may use: only the vendored weights (vendor/fonts/README.md).
     ...[400, 500, 600, 700, 800].map((weight) => ['Figtree', weight, 'normal', 'figtree']),
     ['Figtree', 400, 'italic', 'figtree', ANY_WEIGHT],
     ...[500, 600, 700].map((weight) => ['Fraunces', weight, 'normal', 'fraunces']),

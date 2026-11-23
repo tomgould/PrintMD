@@ -32,11 +32,10 @@
  * To add a new template:
  *   1. Create /templates/{id}/template.js
  *   2. List it in a manifest: templates/manifest.core.json for a core template,
- *      or a layer manifest (templates/manifest.<name>.json) for a private set,
+ *      or a layer manifest (templates/manifest.<name>.json) for a set of your own,
  *      optionally with a picker "group" and a "description"
  *   Done. No other code changes needed. js/template-registry.js reads and checks
- *   the manifests; the order and the default are explained there. README,
- *   Template contract, has the fields in full and a checklist.
+ *   the manifests; the order and the default are explained there.
  */
 
 import {fontFaceCSS, templateFaces} from './fonts.js';

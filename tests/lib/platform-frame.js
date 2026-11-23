@@ -63,8 +63,8 @@ async function loadScripts(srcs) {
 try {
     // A fresh store, so the saved template is never the fixture from an earlier run.
     await resetStorage();
-    // Boot on a registry template, as an editor with a saved choice does. An edition with no layer of its own
-    // would otherwise start on the fixture, whose layer then comes first.
+    // Boot on a registry template, as an editor with a saved choice does. With no layer in the core manifest
+    // it would otherwise start on the fixture, whose layer then comes first.
     const coreIds = (await (await realFetch('../../templates/manifest.core.json')).json()).templates.map((t) => t.id);
     localStorage.setItem('printmd-state', JSON.stringify({templateId: coreIds[0]}));
     const page =new DOMParser().parseFromString(await (await realFetch('../../index.html')).text(), 'text/html');

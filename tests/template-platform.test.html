@@ -72,7 +72,7 @@
             assert(JSON.stringify(labels) === JSON.stringify([...labels].sort((a, b) => a.localeCompare(b, 'en'))), 'headings are alphabetical: ' + labels);
             assert(labels.indexOf('Test') === labels.length - 1, 'the fixture heading comes last alphabetically: ' + labels);
         } else {
-            // An edition whose templates have no group (the public one): they sit under "Other", which is always last.
+            // Templates with no group (the core manifest gives none) sit under "Other", which is always last.
             assert(JSON.stringify(labels) === JSON.stringify(['Test', 'Other']), 'headings: ' + labels);
         }
         const fixtureIds = r.groups[labels.indexOf('Test')].ids;
@@ -97,7 +97,7 @@
     h.test('Size: only the template\'s sizes; Slide fixes the orientation to landscape and the preview to 16:9', async () => {
         const r = await report;
         assert(r.slideHiddenAtBoot, 'Slide is not offered by a template without it');
-        // Custom size is offered with every template (README, Export: Page options).
+        // Custom size is offered with every template.
         assert(JSON.stringify(r.offered) === JSON.stringify(['A4', 'Letter', 'Slide', 'Custom']), 'the fixture offers its sizes: ' + r.offered);
         assert(r.slide.paper === 'Slide' && r.slide.orientation === 'landscape' && r.slide.orientationDisabled, JSON.stringify(r.slide));
         assert(r.slide.landscape && Math.abs(Number(r.slide.aspect) - 142.9 / 254) < 0.001, 'preview aspect: ' + r.slide.aspect);
@@ -107,7 +107,7 @@
 
     h.test('default page: choosing a template that names one sets Size and Page; a later choice stands', async () => {
         const r = await report;
-        if (!r.chosen) return;  // no template in this edition names a default page
+        if (!r.chosen) return;  // no template names a default page
         assert(r.chosen.paper === 'Slide' && r.chosen.orientation === 'landscape', 'chosen: ' + JSON.stringify(r.chosen));
         assert(r.chosenA4.paper === 'A4' && r.chosenA4.orientation === 'landscape', 'A4 chosen after: ' + JSON.stringify(r.chosenA4));
         assert(r.afterwards.paper === 'A4' && r.afterwards.orientation === 'landscape',

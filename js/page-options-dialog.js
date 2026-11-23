@@ -1,7 +1,7 @@
 /**
  * js/page-options-dialog.js
  *
- * The Page options dialog (README, Export: Page options): a custom page size
+ * The Page options dialog (js/export-options.js): a custom page size
  * (width, height, unit), the layout (pages or one continuous page), fit to size
  * and a margin override, for the open document. Built like the app's other
  * dialogs (js/password-dialog.js): Tab stays inside, Escape and Cancel change

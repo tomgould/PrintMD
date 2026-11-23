@@ -4,9 +4,9 @@ These checks need a real browser, real files or native dialogs, so `node tests/r
 D1 to D5 use the File System Access API, which only exists in secure contexts (https or localhost) and needs real user
 gestures.
 
-**Only a person can check:** real Microsoft Word and PowerPoint (O1, O2), Firefox and Safari (S3 step 4, S9 step 2,
+**Only a person can check:** real Microsoft Word and PowerPoint (O1, O2), Firefox and Safari (S3 step 4, S9 step 3, D17 step 9,
 A2), screen readers (A1 NVDA, A2 VoiceOver), Google Drive with real credentials (S1, S2), the templates in the
-browser's print (T1 to T3) and the service across a real login (P3). Write the date, browser and result next to a
+browser's print (T1 to T3) and the service as a real systemd user service (P3). Write the date, browser and result next to a
 check when you run it.
 
 | Check | What it covers |
@@ -43,12 +43,12 @@ check when you run it.
 | **Front matter** | |
 | [F1](#f1-front-matter-in-the-editor-and-every-export) | Front matter in the editor and every export |
 | **Templates** | |
-| [T1](#t1-the-template-picker-and-each-templates-page) | The template picker, its groups, and each template's page sizes and starting page |
-| [T2](#t2-a-running-head-and-foot-in-the-editors-pdf) | A running head and foot, and the Slide size, in the editor's PDF |
-| [T3](#t3-the-cover-in-the-preview) | The cover in the preview, in both orientations and Slide |
+| [T1](#t1-the-template-picker-and-each-templates-page) | The template picker and each template's page sizes |
+| [T2](#t2-a-running-head-and-foot-in-the-editors-pdf) | A running head and foot in the editor's PDF |
+| [T3](#t3-the-cover-in-the-preview) | The cover in the preview, in both orientations |
 | **Page options** | |
 | [L1](#l1-a-custom-size) | A custom size in the print dialog's PDF, and values the dialog refuses |
-| [L2](#l2-one-continuous-page) | One continuous page: three templates, bookmarks and links, a manual break ignored |
+| [L2](#l2-one-continuous-page) | One continuous page: both templates, bookmarks and links, a manual break ignored |
 | [L3](#l3-fit-to-size) | Fit width, its 40% limit, and widest |
 | [L4](#l4-the-margin) | Margins of 0 and 30 mm, and the running head under 18 mm |
 | [L5](#l5-each-document-keeps-its-page-options) | Each document keeps its page options through a reload and a restart; a new one starts plain |
@@ -190,17 +190,12 @@ browser. Use a port this browser has never opened the app on, so its database do
 2. In the welcome document pick a second template, then **A3**, **Landscape**, **Word**. Press **Alt+N**
    (**Ctrl+Option+N** on macOS) and type a heading. **Expected:** the new document starts with that template, A3,
    Landscape, Word.
-3. In the new document pick a template that starts on its own page (one that offers **Slide 16:9**). **Expected:**
-   Size becomes **Slide 16:9** with Page locked to Landscape. Set As to **PowerPoint**. Where no template offers Slide,
-   pick any other template, **Letter**, **Portrait** and **PowerPoint**.
+3. In the new document pick the other template, **Letter**, **Portrait** and **PowerPoint**.
 4. Click the welcome document in the sidebar, then the new one, a few times. **Expected:** each shows its own template,
-   Size, Page and As, and the preview page changes shape to match (wide for A3 landscape, wider still for Slide). The
-   order of the sidebar does not change.
+   Size, Page and As, and the preview page changes shape to match (wide for A3 landscape). The order of the sidebar
+   does not change.
 5. Reload the page and repeat step 4. **Expected:** the same.
 6. Quit Chrome completely, start it again with the same `--user-data-dir`, and repeat step 4. **Expected:** the same.
-7. In the Slide document pick **Letter** and **Portrait**, switch away and back, and reload. **Expected:** Letter,
-   Portrait: opening a document never puts it back on its template's starting page; only picking the template in the
-   template menu does.
 
 ### D13. The split, theme, view and sidebar are remembered
 
@@ -324,8 +319,8 @@ The automated tests stub `fetch`, so these are the only checks against Google it
    saying the password did not open the PDF, then the document imports. Pressing **Escape** in the dialog cancels the
    import with no message and no document.
 4. In Safari (16.3 or older if available, and a current version), load the app and import any PDF. **Expected:** the
-   app starts (no regex lookbehind left to stop it parsing). PDF import needs Safari 17.4 or later (README, Browser
-   support): there the PDF imports; on an older Safari the import fails with a message and creates no document.
+   app starts (no regex lookbehind left to stop it parsing). PDF import needs Safari 17.4 or later: there the PDF
+   imports; on an older Safari the import fails with a message and creates no document.
 
 ### S4. An embed from an allow-listed host plays
 
@@ -366,12 +361,12 @@ The automated tests stub `fetch`, so these are the only checks against Google it
 ### S8. Print preview fidelity
 
 1. Open `markdown-showcase.md` from the repo with **Open** and export it as PDF with each template.
-   **Expected:** the print preview shows each template's own body font (the first family in its `fontStack`, such as
-   Montserrat, or Source Serif Pro with Inter headings for Unbranded), not Arial or Times. Saving as PDF and running `pdffonts` on the file lists those
-   families as embedded. Add a line `Dvořák in Łódź, Māori, Ștefan`: its accented letters use the same font as the
+   **Expected:** the print preview shows each template's own fonts (Libre Caslon Text with Schibsted Grotesk headings
+   for Dealmobile, Source Serif Pro with Inter headings for Unbranded), not Arial or Times. Saving as PDF and running
+   `pdffonts` on the file lists those families as embedded. Add a line `Dvořák in Łódź, Māori, Ștefan`: its accented letters use the same font as the
    text around them, and `pdffonts` lists no extra font.
-2. Choose **Letter** and **Landscape** and export again. **Expected:** the cover fills exactly page 1 (logo at the top,
-   footer bar at the bottom) and the document starts on page 2, with no blank or half-filled cover page.
+2. Choose **Letter** and **Landscape** and export again. **Expected:** the cover fills exactly page 1 and the
+   document starts on page 2, with no blank or half-filled cover page.
 3. Choose **A4** and **Portrait**. **Expected:** the cover fills page 1 and the body pages keep the template's margin.
 
 ### S9. Print quality of the editor's PDF in Chrome, Firefox and Safari
@@ -392,10 +387,10 @@ The automated checks cover the API's PDF; the editor's PDF comes from each brows
 4. Add `<img src="..." width="576" alt="small">` with an image about 200 px wide (576 CSS px is 6 in), then export.
    **Expected:** the preflight dialog lists *"Image 1 is about 33 ppi at the size it prints; 150 or more prints
    sharply."* before the print window opens (N counts every raster image in the preview).
-5. Rename `vendor/fonts/montserrat/montserrat-latin-400-normal.woff2` on a local copy, reload with the cache off
-   (DevTools > Network > Disable cache), and export a document with a template whose body font is Montserrat.
-   **Expected:** the print window's own confirm asks *"Font Montserrat 400 did not load…, so the PDF would print it in
-   a fallback font."* and *"Print anyway?"*; **Cancel** closes it without printing, **OK** prints in a fallback font. Put the
+5. Rename `vendor/fonts/libre-caslon-text/libre-caslon-text-latin-400-normal.woff2` on a local copy, reload with the
+   cache off (DevTools > Network > Disable cache), and export a document with Dealmobile.
+   **Expected:** the print window's own confirm asks *"Font Libre Caslon Text 400 did not load, so the PDF would print
+   it in a fallback font."* and *"Print anyway?"*; **Cancel** closes it without printing, **OK** prints in a fallback font. Put the
    file back.
 6. Add `print-links: true` to the front matter and export. **Expected:** each external link prints its address after
    the text, in brackets and smaller type, in the PDF only (not the preview); an autolink (`<https://...>`), a
@@ -405,8 +400,8 @@ The automated checks cover the API's PDF; the editor's PDF comes from each brows
 
 The automated checks raster the API's PDF (`server/test/code-blocks.test.mjs`); this checks the browser's own print.
 
-1. Export `tests/fixtures/code-showcase.md` as PDF with a template that has a dark code background and with
-   Unbranded (a light one), and save each as PDF, leaving **Background graphics** unticked.
+1. Export `tests/fixtures/code-showcase.md` as PDF with each template, and save each as PDF, leaving **Background
+   graphics** unticked.
 2. **Expected:** each fenced block with a language (```` ```php ````, ```` ```bash ````) has a small upper-case label
    in its top-right corner with a coloured dot before it, and its code is coloured (keywords, strings, comments,
    functions in different colours) on the template's code background. The colours print without **Background
@@ -432,7 +427,7 @@ The automated checks raster the API's PDF (`server/test/code-blocks.test.mjs`); 
    ```
 
    **Expected:** the preview shows no `---` rules or `key: value` lines; the cover reads *Front Matter Check*, the
-   author (*Prepared by Jo Bloggs* on the branded templates, *Jo Bloggs* on Unbranded) and *1 March 2026*; the sidebar
+   author (*Prepared by Jo Bloggs* on Dealmobile, *Jo Bloggs* on Unbranded) and *1 March 2026*; the sidebar
    lists the document as *Front Matter Check*.
 2. Export it as PDF, Word and PowerPoint. **Expected:** each has the same cover title, author and date, and none shows
    the front matter lines. The automated tests cover the Word and PowerPoint files from `prepareExport` on
@@ -440,46 +435,35 @@ The automated checks raster the API's PDF (`server/test/code-blocks.test.mjs`); 
 
 ## Templates
 
-`template-platform.test.html` covers the picker, the sizes and the default page with a test-only template, and the
-server's print-quality tests check every template's PDF from the API. These checks look at the deployment's real
-templates in the editor and in the browser's own print. The README's [Templates](../README.md#templates) table says
-which template has a running head and foot, which offers Slide, which offers fewer paper sizes, and which has a page
-colour.
+`template-platform.test.html` covers the picker, the sizes, the Slide size and the default page with a test-only
+template, and the server's print-quality tests check every template's PDF from the API. These checks look at the two
+templates in [`templates/`](../templates) in the editor and in the browser's own print. Dealmobile has a running head
+and foot; neither offers Slide or has a page colour.
 
 ### T1. The template picker and each template's page
 
-1. Open the template picker. **Expected:** with groups in the manifests, one heading per group, A to Z (a template
-   with no group under *Other*, last), and the templates under each heading A to Z by name; the first manifest entry
-   is chosen on a first visit. `Ctrl+K` and typing `template` lists the same templates in the same order, each with
-   its group ("Template: *name* (*group*)").
-2. Choose the template that offers Slide and starts on it. **Expected:** **Size** changes to *Slide* and offers only
-   that template's sizes; **Page** shows *Landscape* and cannot be changed while Slide is chosen. Choose **A4**:
-   **Page** can be changed again.
-3. Choose a template that lists fewer paper sizes. **Expected:** **Size** offers only those. Choose one with no
-   `page.sizes`: A4, A3, A5, Letter and Legal, no Slide.
-4. Click **Info** on a template whose manifest entry has a `description`. **Expected:** the popover shows that
-   description.
+1. Open the template picker. **Expected:** a flat list A to Z by name, *Dealmobile* then *Unbranded*, with
+   *Unbranded* (the first manifest entry) chosen on a first visit. `Ctrl+K` and typing `template` lists the same
+   templates in the same order ("Template: *name*").
+2. Choose each template. **Expected:** **Size** offers A4, A3, A5, Letter, Legal and **Custom size...**, and no
+   Slide; **Page** can be changed.
+3. Choose Dealmobile and click **Info**. **Expected:** the popover shows the description from its manifest entry.
 
 ### T2. A running head and foot in the editor's PDF
 
-1. Choose a template with a running head and foot, add front matter with `title`, `author` and `subject`, write
+1. Choose Dealmobile, add front matter with `title`, `author` and `subject`, write
    enough text for three pages, and export as PDF (untick **Headers and footers** in the print dialog).
    **Expected:** the preview shows no running head or foot; the PDF shows them on every body page and never on the
    cover, with page numbers that count the cover (the first body page is page 2), the text clear of the paper edge.
-2. Do the same with the other templates that have one, in A4 portrait and landscape. **Expected:** as step 1, and the
-   head and foot line up with the text column's left and right edges.
-3. Choose the template that starts on Slide and export. **Expected:** 16:9 pages (`pdfinfo` gives about 720 x 405
-   pts), the cover filling page 1.
-4. Choose a template with a page colour and export with **Background graphics** ticked. **Expected:** the body pages
-   take the colour to the paper edge, margins included; the cover is as it is without it.
+2. Do the same in A4 portrait and landscape. **Expected:** as step 1, and the head and foot line up with the text
+   column's left and right edges.
 
 ### T3. The cover in the preview
 
-1. With each template whose cover fills the page, look at the preview in A4 portrait, then A4 landscape.
+1. With each template, look at the preview in A4 portrait, then A4 landscape.
    **Expected:** the cover card is exactly one page tall in both (no strip of white under a full-page cover, nothing
    cut off at its foot) and looks like page 1 of the exported PDF.
-2. Choose the template that starts on Slide. **Expected:** the cover card has the 16:9 shape of a slide.
-3. Narrow the preview pane with the divider. **Expected:** the cover card keeps its page shape as it shrinks.
+2. Narrow the preview pane with the divider. **Expected:** the cover card keeps its page shape as it shrinks.
 
 ## Page options
 
@@ -499,10 +483,9 @@ dialog, which no test can drive. In each, keep **Margins: Default** and **Scale:
 
 ### L2. One continuous page
 
-1. Open the demo document (`~/Downloads/printmd-demo-source/printmd-demo.md`, with its two images), choose
-   **Options > One continuous page** and export as PDF with three templates, the deck and a dark one among them.
+1. Open `markdown-showcase.md`, choose **Options > One continuous page** and export as PDF with each template.
    **Expected:** a single page in the print preview, as wide as the chosen size and as tall as the document, the cover
-   at the top at its own height (the deck's at the slide's), no page numbers, the last line close to the bottom edge.
+   at the top at its own height, no page numbers, the last line close to the bottom edge.
 2. Open the saved PDF. **Expected:** one page (`pdfinfo`), bookmarks in the sidebar that jump to their headings,
    links that open.
 3. Add a manual page break (`<div style="page-break-after: always"></div>`) and export again. **Expected:** still one
@@ -523,7 +506,7 @@ dialog, which no test can drive. In each, keep **Margins: Default** and **Scale:
 
 1. Set the margin to 0 and export. **Expected:** the text runs to the paper edge (the print dialog's own headers off).
 2. Set it to 30 mm. **Expected:** a wide white border on every side.
-3. With a template that has a running head and foot, set 12 mm and export. **Expected:** the list before the print
+3. With Dealmobile, set 12 mm and export. **Expected:** the list before the print
    window says the running head and foot are left out; the PDF has none. Set 18 mm. **Expected:** they print, closer
    to the text.
 
@@ -575,13 +558,15 @@ out: click **Export anyway**).
 
 ### P1. A colleague's first run of the PDF API
 
-On a machine that has never run it (macOS too, if anyone uses one), follow the README's
-[Run it on your machine](../README.md#run-it-on-your-machine) steps word for word.
+On a machine that has never run it (macOS too), follow the README's [Quick start](../README.md#quick-start) and
+[The PDF service](../README.md#the-pdf-service) steps word for word.
 
 1. **Expected:** `npm --prefix server ci` and the browser step finish without errors, and `start:local` prints the
    `listening` line.
-2. Run the README's showcase `curl` command, then open `showcase.pdf`. **Expected:** the cover of the template the command
-   names, then the body in that template's font, the same as **Export** with **PDF** under **As** in the editor.
+2. Run the README's render `curl` command on `markdown-showcase.md` (`--data-binary @markdown-showcase.md -o
+   showcase.pdf`), then open `showcase.pdf`. **Expected:** the cover of the template the command names, then the body
+   in that template's font, as **Export** with **PDF** under **As** in the editor gives, except the showcase's web
+   photos: the service does not fetch them and lists them in `X-PrintMD-Warnings`.
 3. Stop the server with Ctrl+C. **Expected:** it exits, and `curl -s http://127.0.0.1:5787/api/v1/health` fails to
    connect.
 

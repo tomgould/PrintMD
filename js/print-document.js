@@ -25,7 +25,7 @@ import {DEFAULT_LANG, LANG_RE} from './doc-meta.js';
  * page, margins included; a cover page keeps none, so a full-bleed cover prints
  * as it would without it.
  *
- * The continuous layout (README, Export: Page options) is one page of the chosen
+ * The continuous layout (js/export-options.js) is one page of the chosen
  * width with no page margin: the margin is the body block's padding, so the
  * cover runs edge to edge at the top and takes its own height, not a page's. The
  * height here is a start; js/page-layout.js measures the laid-out document and
@@ -243,7 +243,7 @@ export function buildPrintDocument({
     const langTag = typeof lang === 'string' && LANG_RE.test(lang) ? lang : DEFAULT_LANG;
     const body = printLinks ? markPrintLinks(bodyHTML) : bodyHTML;
     const colour = validPageBackground(pageBackground);
-    // The running head and foot (README, Template contract), and its font kept loaded.
+    // The running head and foot (js/page-chrome.js), and its font kept loaded.
     const values = {title, author, subject, date};
     const runningCss = buildRunningCss(running, values, {pageOpts, cover: Boolean(coverHTML)});
     const probe = runningCss ? runningFontProbe(running, values) : null;

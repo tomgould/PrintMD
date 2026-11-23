@@ -1,6 +1,6 @@
 /**
  * A test-only template: never listed in a manifest the app or the API reads.
- * It uses every part of the template platform (README, Template contract):
+ * It uses every part of the template platform (js/templates.js):
  * a running head and foot with every token and a logo in the foot, the subject
  * on the cover, the Slide page size (manifest.page.sizes), a dark page canvas
  * (pageBackground), Inter's true italics, and a face of each font family added

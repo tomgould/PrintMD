@@ -1,5 +1,5 @@
 /**
- * Page control through the PDF API (README, Export: Page options), the part CI runs
+ * Page control through the PDF API (js/export-options.js), the part CI runs
  * (tests/lib/server-tests.mjs): the options refused with 400 invalid_option, a custom
  * page size, the one continuous page (and the split past the longest PDF page), fit
  * width and its lower bound, and the margin override with the running head and foot.

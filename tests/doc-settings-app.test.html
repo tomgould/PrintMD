@@ -188,7 +188,7 @@
     });
 
     h.test('opening a document never applies its template\'s default page; picking the template does', async () => {
-        if (!DECK) return;   // no template with a default page in this edition
+        if (!DECK) return;   // no template names a default page
         await resetA();
         const deck = idOf(DECK);
         // D: the deck template with Letter portrait stored. E: the deck template and no settings stored.

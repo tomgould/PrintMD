@@ -1,6 +1,6 @@
 /**
  * page-layout.js
- * The page options that need the laid-out document (README, Export: Page options):
+ * The page options that need the laid-out document (js/export-options.js):
  * fit to size, the one continuous page's height, and the widest-block page width.
  *
  * The print document (js/print-document.js) has no scripts, so this runs from

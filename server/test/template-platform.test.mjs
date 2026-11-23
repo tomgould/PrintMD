@@ -223,7 +223,7 @@ test('the listing carries the fixture entry\'s group and description, Slide amon
     assert.equal(fixture.description, 'The fixture, as its manifest entry describes it');
     assert.deepEqual(fixture.pageSizes, ['A4', 'Letter', 'Slide']);
     assert.deepEqual(Object.keys(fixture), ['id', 'name', 'description', 'group', 'version', 'margin', 'pageSizes', 'orientations']);
-    // A build's manifests may give every template a group ("Current" for the default); this edition's have none.
+    // Manifests may give every template a group ("Current" for the default); the core manifest gives none.
     for (const t of list.templates.filter((x) => x.id !== ID && x.id !== PLAIN)) {
         // defaultSize and defaultOrientation only for a template whose manifest names them; group likewise.
         const defaults = ['defaultSize', 'defaultOrientation'].filter((k) => k in t);
@@ -231,7 +231,7 @@ test('the listing carries the fixture entry\'s group and description, Slide amon
         assert.deepEqual(Object.keys(t), ['id', 'name', 'description', ...group, 'version', 'margin', 'pageSizes', 'orientations', ...defaults], t.id);
         assert.ok(!('group' in t) || (typeof t.group === 'string' && t.group.length > 0), `${t.id}: a group, when it has one, is text`);
     }
-    // The first template of the real manifests (the fixtures' layers may come first in an edition with no layer of its own).
+    // The first template of the real manifests (the fixtures' layers may come first when the core manifest names no layer).
     const firstReal = list.templates.find((x) => x.id !== ID && x.id !== PLAIN);
     if ('group' in firstReal) assert.equal(firstReal.group, 'Current', 'the default template');
     assert.ok(!list.warnings, `no layer skipped: ${list.warnings}`);

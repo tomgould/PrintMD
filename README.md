@@ -83,9 +83,10 @@ PrintMD is made to run on your own machine. That is where you get everything:
 - The PDF service renders with your own copy of Chrome, so it is fast and nothing leaves your computer.
 - Files you open stay linked to the file on disk, and saves go back to it.
 
-A hosted copy of the editor works for a look around and for PDFs through the browser's print dialog. It shows a
-notice saying so. **The PDF service is not available when hosted**: it refuses to start on anything but your own
-machine (127.0.0.1), and that is deliberate, not a missing feature.
+A hosted copy of the editor runs at <https://printmd.dealmobile.co.uk>. It works for a look around and for PDFs
+through the browser's print dialog, and shows a notice saying so. **The PDF service is not available when
+hosted**: it refuses to start on anything but your own machine (127.0.0.1), and that is deliberate, not a missing
+feature.
 
 ## Quick start
 
@@ -122,7 +123,9 @@ found (a missing title, an image that is too small to print well). `GET /api/v1/
 page sizes each one offers.
 
 On Linux, `server/service/install-service.sh` installs it as a user service that starts at login. The browser opens
-for a PDF and closes again when idle, so it does not sit in memory.
+for a PDF and closes again when idle, so it does not sit in memory. To start the service only on the first request
+instead, put a loopback proxy such as a systemd socket in front of it and set `PRINTMD_PROXY_PORT` to the proxy's
+port, so the service accepts requests addressed to that port too.
 
 ## What it does
 

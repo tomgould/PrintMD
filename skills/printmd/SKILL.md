@@ -68,7 +68,7 @@ template: dealmobile
 
 The cover shows `title`, so keep it the same as the H1. Ask the user for the author, and use today's date unless
 they give one. `subject`, `lang` (a language tag such as `en-GB`) and `print-links: true` are optional. These
-always go in the front matter, written with the Write or Edit tool, never on the command line.
+always go in the front matter, written into the file, never on the command line.
 
 Save the file where the user wants the PDF, since the PDF goes next to it. Put images in the same folder or a
 subfolder and link them with relative paths (`![Chart](img/chart.png)`). PNG, JPEG, GIF, WebP and SVG work, up to

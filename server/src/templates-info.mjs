@@ -11,7 +11,7 @@ import {
 import {RUNNING_LIMITS} from '../../js/page-chrome.js';
 
 /**
- * The page options every template takes (README, PDF API options), with their limits: a custom
+ * The page options every template takes (server/README.md), with their limits: a custom
  * pageSize ("100x150mm"), layout, fit and a margin override.
  */
 export const PAGE_OPTIONS = Object.freeze({

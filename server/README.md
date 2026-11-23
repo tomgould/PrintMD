@@ -9,7 +9,7 @@ or any address other than loopback. Run it where you work.
 ```bash
 npm --prefix server ci
 npx --prefix server playwright install chromium     # or: export PRINTMD_CHROME=/usr/bin/google-chrome
-npm --prefix server run start:local                  # plain `npm start` does the same in this edition
+npm --prefix server run start:local                  # plain `npm start` does the same
 ```
 
 On Ubuntu 23.10 and later, AppArmor stops unprivileged programs from making the user namespaces Chromium's sandbox
@@ -22,12 +22,12 @@ the service (or pass `--port` to the installer) and `PRINTMD_URL` for the skill 
 
 `GET /api/v1/health` names the service: `{"service": "printmd", "status": "ok", "version": ...}`. The skill and the
 MCP server check that name before they list templates or send a document, and refuse any other answer, so a
-document never goes to another program on the port. A PrintMD started before its health answer carried the name is
-refused too until it is restarted.
+document never goes to another program on the port.
 
-On Linux, `server/service/install-service.sh` installs it as a user
-service that starts at login and closes the browser a minute after the last render, so it idles at the memory of a
-small Node process.
+On Linux, `server/service/install-service.sh` installs it as a user service that starts at login and closes the
+browser a minute after the last render, so it idles at the memory of a small Node process. Its header lists the
+options (`--port`, `--idle`, `--chrome`, `--uninstall` and more). To start the service on the first request instead,
+put a loopback proxy such as a systemd socket in front of it and set `PRINTMD_PROXY_PORT` (see Settings).
 
 ## Use it
 
@@ -44,7 +44,7 @@ Markdown and the same options as fields. The answer is `application/pdf`.
 | Option | Values |
 |---|---|
 | `template` | An id from `GET /api/v1/templates`. Default: the first one listed. |
-| `pageSize` | A named size (`A4`, `A3`, `A5`, `Letter`, `Legal`) or a custom one: `100x150mm`, `8.5x11in`, `1200x800px`. |
+| `pageSize` | A named size the template offers (`A4`, `A3`, `A5`, `Letter`, `Legal`; `GET /api/v1/templates` lists them) or a custom one: `100x150mm`, `8.5x11in`, `1200x800px`. |
 | `orientation` | `portrait` or `landscape`. |
 | `layout` | `paged` (default) or `continuous`, one page as tall as the document. |
 | `fit` | `off` (default), `width` or `widest`: scale a block that is too wide down to fit. |
@@ -52,6 +52,7 @@ Markdown and the same options as fields. The answer is `application/pdf`.
 | `title`, `author`, `date`, `subject` | The cover and the PDF's details. In a JSON body they go under `meta`. |
 | `lang` | The PDF's language tag, such as `en-GB`. |
 | `printLinks` | `true` prints each link's address after its text. |
+| `cover` | `false` leaves out the cover. |
 | `tidy` | `false` turns off the small scale-down that rescues a nearly empty last page. |
 | `strict` | `true` answers 422 instead of a PDF when the render found a problem. |
 
@@ -76,7 +77,7 @@ when it is busy, 504 when a render ran out of time.
 
 ## Settings
 
-All settings are environment variables, read once by `src/config.mjs` (its header lists them):
+All settings are environment variables, read once by `src/config.mjs`:
 
 | Variable | Default |
 |---|---|

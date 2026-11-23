@@ -215,7 +215,7 @@ async function readLayer(base, layer, read, ms) {
  *
  * Only the core manifest is fatal: when it is missing or invalid, or when no
  * template is left, this rejects with TemplateRegistryError. Everything else
- * is skipped with one warning each, so a broken private layer never takes the
+ * is skipped with one warning each, so a broken layer never takes the
  * core templates down with it: a layer that cannot be read or parsed (bad JSON,
  * an HTML fallback page, a server error, a rule broken, no answer in time), a
  * layer entry whose id is already taken (core and earlier layers win), and any

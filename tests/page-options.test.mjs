@@ -1,5 +1,5 @@
 /**
- * Page control (README, Export: Page options): custom page sizes, the one continuous
+ * Page control (js/export-options.js): custom page sizes, the one continuous
  * page layout, fit to size and the margin override, as plain data. Every value is
  * parsed to numbers and a unit from an allow-list and written back by the code, so
  * nothing a person, a stored record, an API request or front matter sends reaches the

@@ -15,7 +15,7 @@ import {CHROME} from './helpers.mjs';
 
 const CORE = JSON.parse(readFileSync(join(REPO_ROOT, 'templates/manifest.core.json'), 'utf8'));
 const CORE_IDS = CORE.templates.map((t) => t.id);
-// The core manifest may name no layers (this edition ships none); copyRepo adds one either way.
+// The core manifest names no layers; copyRepo adds one either way.
 const LAYER = (CORE.layers || [])[0] || 'templates/manifest.extra.json';
 
 /** A copy of what the server loads, with some files replaced: {relative path: text}. */

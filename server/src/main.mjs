@@ -3,9 +3,8 @@
  * PrintMD PDF API.
  *
  *   npm run start:local    local mode: 127.0.0.1 only, no sign-in, API on
- *   npm start              deployed mode: the access login (PRINTMD_AUTH=access,
- *                          or token for a shared API token), API off unless
- *                          PRINTMD_API_ENABLED=1
+ *   npm start              the same: src/edition.mjs refuses every hosted
+ *                          setting, so the service always runs in local mode
  *
  * Settings: see src/config.mjs and server/README.md.
  */

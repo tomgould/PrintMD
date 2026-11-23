@@ -9,7 +9,8 @@
  *                                  least MIN_TOKEN_LENGTH printable characters with
  *                                  MIN_TOKEN_DISTINCT different ones (openssl rand -hex 32),
  *                                  sent as Authorization: Bearer <token>
- *     access                       a login proxy's signed JWT (src/auth-access.mjs)
+ *     access                       a login proxy's signed JWT (src/auth-access.mjs; there is no
+ *                                  such file, and src/edition.mjs refuses this mode)
  *   PRINTMD_MODE=local|access   the older name for PRINTMD_AUTH, still accepted
  *   PRINTMD_API_ENABLED=1       switch the API on (default off: 503 api_disabled)
  *   PRINTMD_HOST, PRINTMD_PORT   bind address (default 127.0.0.1:5787)
@@ -35,9 +36,9 @@
  *
  * A caller may pass an edition with allowHostedApi: false, which refuses every
  * hosted setting (token, access, deployed host rules) and runs on a loopback
- * address only. main.mjs passes src/edition.mjs's EDITION, the one place a build
- * pins that. With no edition given every mode is allowed, so tests and tools see
- * the full set.
+ * address only. main.mjs passes src/edition.mjs's EDITION, which sets it to false,
+ * so the service only ever runs locally. With no edition given every mode is
+ * allowed, so the tests can check each one.
  *
  * The API token is never kept: the configuration holds its SHA-256 digest, as a
  * property that JSON, spreads and Object.keys do not show, and no message here

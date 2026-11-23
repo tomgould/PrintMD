@@ -23,7 +23,7 @@
  * Exit code 0 when every check passes, 1 when one fails, 2 on a usage error or
  * a missing tool.
  *
- * Checks (README, Print quality):
+ * Checks:
  *   fonts-embedded  every font is embedded
  *   no-type3        no Type 3 font, except emoji glyph sets when the text holds emoji
  *                   (Chromium prints colour emoji from the system font as Type 3, unnamed

@@ -93,7 +93,7 @@ for (const s of SAMPLES) {
         assert.equal(r.status, 200);
         const file = join(dir, `${s.template}-${s.pageSize}-${s.orientation}-${s.cover ? 'cover' : 'nocover'}.pdf`);
         writeFileSync(file, r.body);
-        // The sample holds one raster image; a template's styles must add none (README, Template contract).
+        // The sample holds one raster image; a template's styles must add none.
         const result = await checkPdf(file, {cover: s.cover, pageSize: s.pageSize, orientation: s.orientation, maxImages: SAMPLE_IMAGES});
         assert.ok(result.ok, formatResult(result));
         assert.ok(result.checks.some((c) => c.id === 'raster-images'), 'the raster image count was checked');

@@ -1085,7 +1085,7 @@ async function doExport(format) {
         try {
             // Same pipeline as the PDF: front matter stripped, metadata on the cover.
             const {doc, bodyHTML, pageOpts} = prepareExport(editor.value, currentTemplateEntry, exportRequest());
-            // Images are not embedded in Word (roadmap M8-T15): say so before, and in the toast after.
+            // Images are not embedded in Word: say so before, and in the toast after.
             const leftOut = wordImagesNote(countWordImages(bodyHTML), {before: true});
             if (leftOut && await showPreflightDialog([leftOut], {file: 'Word file'}) !== 'proceed') return;
             const warnings = [];

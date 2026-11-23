@@ -1,5 +1,5 @@
 /**
- * The template platform (README, Template contract): the 16:9 Slide page size,
+ * The template platform (js/templates.js): the 16:9 Slide page size,
  * a template's page background, the running head and foot in the page margins
  * (js/page-chrome.js), the subject on the cover, the vendored font set and the
  * picker groups. Pure functions only; the PDFs are checked by

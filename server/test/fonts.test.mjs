@@ -14,7 +14,7 @@ import {isEmojiGlyphSet} from '../qa/pdf-qa.mjs';
 
 const SHOWCASE = readFileSync(new URL('../../tests/fixtures/code-showcase.md', import.meta.url), 'utf8');
 const SYMBOLS = '┌──┬──┐ ╔══╗ ← ↑ → ↓ ↔ ⇒ ✓ ✔ ✗ ✘ ☐ ☑ ❖ ★ ⚙ ✏ ⚠ ☺ ♪ █ ▓ ░ • ≠ ≤ ≥ ± × ÷ … \u{2014} € © ™';   // \u{2014}: the em-dash, escaped so the source has none
-/** Emoji: printed from the system's colour emoji font, as Type 3 (README, Known limitations). */
+/** Emoji: printed from the system's colour emoji font, as Type 3 (vendor/fonts/README.md). */
 const EMOJI = '😀 🚀 ✅ ❌';
 /**
  * The symbols in a heading (the cover title too), in prose (regular, bold, italic, bold italic), in inline

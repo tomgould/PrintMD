@@ -14,9 +14,10 @@
  *           same 401 with no detail. The token is never logged or echoed. Caller
  *           token@localhost.
  *   access  a login proxy's signed JWT, checked by src/auth-access.mjs. That file
- *           and its jose dependency are imported only in this mode, so a build
- *           without them works in the other modes; in this mode, if either cannot
- *           be loaded, the server refuses to start (ConfigError).
+ *           and its jose dependency are imported only in this mode, so the other
+ *           modes work without them; in this mode, if either cannot be loaded, the
+ *           server refuses to start (ConfigError). There is no src/auth-access.mjs:
+ *           src/edition.mjs refuses this mode before the import is tried.
  *
  * Test bypass (NODE_ENV=test only): test@localhost.
  */
