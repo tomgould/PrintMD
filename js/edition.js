@@ -1,10 +1,10 @@
 /**
- * The edition switch for the editor. The public edition's build changes hostedNotice to
- * true. Keep this file tiny (the build edits that one value) and keep the logic in
- * hostedNoticeVisible(), so the tests cover both values of the flag.
+ * The edition switch for the editor: hostedNotice turns on the "run it locally" notice
+ * for hosted copies. Keep this file tiny and keep the logic in hostedNoticeVisible(),
+ * so the tests cover both values of the flag.
  */
 
-/** The edition switch. The hosted copy notice stays off until a build turns it on. */
+/** The edition switch. The hosted copy notice is on. */
 export const EDITION = Object.freeze({hostedNotice: true});
 
 /**

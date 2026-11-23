@@ -181,10 +181,10 @@ node tests/run-all.mjs unit       # the fast unit tests only
 The browser tests need Chrome. The PDF checks use `pdfinfo`, `pdftotext` and `pdffonts` from poppler if they are on
 your path. `docs/MANUAL-TESTS.md` lists what only a person can check.
 
-## Blog and product page
+## Product page and posts
 
-`site/index.html` is a single-file product page and `blog/` holds the posts that go with it. Both are plain files
-you can host anywhere; neither is part of the app.
+`site/index.html` is a single-file product page you can host anywhere; it is not part of the app. The posts about
+PrintMD are on [dealmobile.co.uk](https://www.dealmobile.co.uk/projects/printmd).
 
 ## Licence
 

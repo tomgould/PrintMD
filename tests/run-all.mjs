@@ -6,10 +6,9 @@
  *                  tests/page-options.test.mjs (page control: custom size, layout, fit, margin)
  *                  tests/mcp.test.mjs (the MCP server over stdio, against a stub of the PDF API)
  *                  tests/template-*.test.mjs (the registry, the platform, one file per template)
- *                  tests/public-edition.test.mjs (when present)
  *                                       (pure-function unit tests, the page runner's timeouts, code blocks,
  *                                       the server test selection, the template manifests, the template
- *                                       platform (page sizes, running head and foot, fonts), the public-edition checks)
+ *                                       platform (page sizes, running head and foot, fonts))
  *   2. every tests/*.test.html          (browser tests, headless Chrome over http)
  *   2b. tests/a11y-keys.mjs            (keyboard walkthrough with real key events, accessibility tree),
  *                                       one suite per group: a11y-keys-dialogs, -page, -sidebar, -palette
@@ -73,10 +72,7 @@ function runUnit() {
             // The MCP server for local AI agents, over stdio against a stub of the PDF API.
             'tests/mcp.test.mjs',
             // The registry, the platform, and one file per template (tests/template-{id}.test.mjs).
-            ...readdirSync(resolve(root, 'tests')).filter((f) => /^template-[a-z0-9-]+\.test\.mjs$/.test(f)).sort().map((f) => `tests/${f}`),
-            // The public-edition checks, which a public build does not ship.
-            ...(existsSync(resolve(root, 'tests/public-edition.test.mjs')) ? ['tests/public-edition.test.mjs'] : []),
-            ...(existsSync(resolve(root, 'tests/make-public.test.mjs')) ? ['tests/make-public.test.mjs'] : [])], {
+            ...readdirSync(resolve(root, 'tests')).filter((f) => /^template-[a-z0-9-]+\.test\.mjs$/.test(f)).sort().map((f) => `tests/${f}`)], {
             cwd: root, stdio: 'inherit',
         });
         child.once('error', () => ok(false));

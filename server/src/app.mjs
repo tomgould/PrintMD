@@ -165,7 +165,8 @@ function splitHost(value) {
  * With authentication off (local mode, test bypass) any web page the user opens
  * could otherwise reach it: by DNS rebinding (a foreign name that resolves to
  * 127.0.0.1) or by a cross-site request. So every route answers only when the
- * Host header is 127.0.0.1, localhost or [::1] with the server's own port, and
+ * Host header is 127.0.0.1, localhost or [::1] with the server's own port (or the
+ * loopback proxy's, PRINTMD_PROXY_PORT), and
  * a request that carries an Origin header (browsers add it) must come from that
  * same loopback origin; "Origin: null" is refused too. Curl and scripts send no
  * Origin and are unaffected.
@@ -179,10 +180,11 @@ function checkHostAndOrigin(req, config) {
     const count = (name) => req.rawHeaders.filter((h, i) => i % 2 === 0 && h.toLowerCase() === name).length;
     if (count('host') > 1) throw new ApiError(403, 'forbidden_host', 'Send one Host header.');
     if (count('origin') > 1) throw new ApiError(403, 'forbidden_origin', 'Send at most one Origin header.');
-    const port = String(req.socket.localPort);
+    const ports = new Set([String(req.socket.localPort)]);
+    if (config.proxyPort) ports.add(String(config.proxyPort));
     const host = splitHost(req.headers.host);
     if (config.mode === 'local' || config.testAuthBypass) {
-        if (!host || !LOOPBACK_NAMES.has(host.name) || host.port !== port) {
+        if (!host || !LOOPBACK_NAMES.has(host.name) || !ports.has(host.port)) {
             throw new ApiError(403, 'forbidden_host', 'This server only answers requests to 127.0.0.1, localhost or [::1] on its own port.');
         }
         const origin = req.headers.origin;
@@ -190,7 +192,7 @@ function checkHostAndOrigin(req, config) {
             let ok = false;
             try {
                 const u = new URL(origin);
-                ok = u.protocol === 'http:' && LOOPBACK_NAMES.has(u.hostname) && u.port === port && u.origin === origin.toLowerCase();
+                ok = u.protocol === 'http:' && LOOPBACK_NAMES.has(u.hostname) && ports.has(u.port) && u.origin === origin.toLowerCase();
             } catch { /* "null" and anything unparseable */ }
             if (!ok) throw new ApiError(403, 'forbidden_origin', 'Requests from other web pages are not accepted.');
         }

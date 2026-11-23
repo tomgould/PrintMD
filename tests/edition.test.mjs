@@ -7,14 +7,10 @@
  */
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {existsSync} from 'node:fs';
 import {EDITION, hostedNoticeVisible} from '../js/edition.js';
 
-// The private repository (the one with deploy/public-edition.json) ships the switch off; the public build turns it on.
-const PRIVATE_REPO = existsSync(new URL('../deploy/public-edition.json', import.meta.url));
-
-test('edition: the notice flag is off in the private repository, on in the public build, and EDITION is frozen', () => {
-    assert.equal(EDITION.hostedNotice, !PRIVATE_REPO);
+test('edition: the notice flag is on and EDITION is frozen', () => {
+    assert.equal(EDITION.hostedNotice, true);
     assert.ok(Object.isFrozen(EDITION));
 });
 

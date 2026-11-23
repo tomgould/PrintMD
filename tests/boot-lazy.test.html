@@ -42,7 +42,7 @@
         const files = templateFaces(entry.styles).map((f) => f.file);
         assert(files.length > 0, 'the template names vendored fonts');
         await waitFor(() => files.every((file) => requested().some((u) => u.endsWith('/' + file))), 'every face of the template to be requested');
-        // (Unless the template itself names them: the public edition's default template is set in Source Serif Pro.)
+        // (Unless the template itself names them: the default template is set in Source Serif Pro.)
         const unrelated = requested().filter((u) => /source-serif-pro|noto-sans-symbols/.test(u)
             && !files.some((file) => u.endsWith('/' + file)));
         assert(unrelated.length === 0, 'no font of another template or the symbol fallbacks: ' + unrelated.join(', '));

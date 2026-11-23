@@ -2,7 +2,7 @@
  * The auth providers (src/auth.mjs) and how the mode is chosen (src/config.mjs):
  * local, the shared token for self-hosting, and the access login, which is
  * loaded only when chosen and fails closed when it cannot be loaded. The access
- * provider's own checks are in auth-access.test.mjs, which this edition does not ship.
+ * provider's own checks are in auth-access.test.mjs, which are not included here.
  */
 import {test, mock} from 'node:test';
 import assert from 'node:assert/strict';

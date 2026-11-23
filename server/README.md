@@ -82,6 +82,7 @@ All settings are environment variables, read once by `src/config.mjs` (its heade
 |---|---|
 | `PRINTMD_HOST` | `127.0.0.1`. Anything but a loopback address is refused. |
 | `PRINTMD_PORT` | `5787` |
+| `PRINTMD_PROXY_PORT` | Unset. The port of a loopback proxy in front of the service, such as a systemd socket that starts it on the first request; the Host and Origin checks accept it as well as the service's own port. |
 | `PRINTMD_CHROME` | Path to Chrome or Chromium. Default: the browser Playwright downloaded. |
 | `PRINTMD_BROWSER_IDLE_S` | `0` keeps the browser open. A number of seconds closes it after that long without a render. |
 | `PRINTMD_MAX_EXPANDED_BYTES` | A ceiling for a document's size once every data URI is counted in full. |

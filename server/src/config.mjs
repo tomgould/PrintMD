@@ -13,6 +13,8 @@
  *   PRINTMD_MODE=local|access   the older name for PRINTMD_AUTH, still accepted
  *   PRINTMD_API_ENABLED=1       switch the API on (default off: 503 api_disabled)
  *   PRINTMD_HOST, PRINTMD_PORT   bind address (default 127.0.0.1:5787)
+ *   PRINTMD_PROXY_PORT          local mode: the port of a loopback proxy in front of the server (a systemd socket that
+ *                               starts it on demand); the Host and Origin checks accept it as well as the server's own port
  *   PRINTMD_CHROME              Chrome or Chromium binary (default: Playwright's Chromium)
  *   PRINTMD_BROWSER_IDLE_S      close the browser after this many seconds without a render (default 0: keep it open);
  *                                  the next render starts it again, so a desktop service holds no browser while idle
@@ -122,9 +124,9 @@ function browserIdleMs(value) {
     return Number(value) * 1000;
 }
 
-function port(value) {
+function port(value, name = 'PRINTMD_PORT') {
     if (value === undefined || value === '') return 5787;
-    if (!/^\d{1,5}$/.test(value) || Number(value) > 65535) throw new ConfigError('PRINTMD_PORT must be a port number (0 to 65535).');
+    if (!/^\d{1,5}$/.test(value) || Number(value) > 65535) throw new ConfigError(`${name} must be a port number (0 to 65535).`);
     return Number(value);
 }
 
@@ -178,6 +180,8 @@ export function loadConfig({env = process.env, argv = process.argv.slice(2), edi
         apiEnabled: argv.includes('--local') || !edition.allowHostedApi || TRUE.has(String(env.PRINTMD_API_ENABLED || '').toLowerCase()),
         host,
         port: port(env.PRINTMD_PORT),
+        /** Local mode: a loopback proxy's port the Host and Origin checks also accept (0: none). */
+        proxyPort: env.PRINTMD_PROXY_PORT ? port(env.PRINTMD_PROXY_PORT, 'PRINTMD_PROXY_PORT') : 0,
         testAuthBypass,
         chrome: env.PRINTMD_CHROME || '',
         browserIdleMs: browserIdleMs(env.PRINTMD_BROWSER_IDLE_S),

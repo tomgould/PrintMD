@@ -207,6 +207,27 @@ test('local mode: only a loopback Host with the right port is answered, on every
     assert.equal(post.status, 403);
 });
 
+test('local mode: PRINTMD_PROXY_PORT adds the proxy\'s port to the Host and Origin checks, and nothing else', async () => {
+    const proxied = await startTestApi({env: {PRINTMD_PROXY_PORT: '5787'}});
+    try {
+        const port = proxied.port;
+        for (const host of [`127.0.0.1:5787`, `localhost:5787`, `127.0.0.1:${port}`]) {
+            assert.equal((await raw(port, {headers: {host}})).status, 200, host);
+        }
+        assert.equal((await raw(port, {headers: {host: '127.0.0.1:5787', origin: 'http://localhost:5787'}})).status, 200);
+        for (const host of ['127.0.0.1:5786', 'attacker.example:5787']) {
+            const r = await raw(port, {headers: {host}});
+            assert.equal(r.status, 403, host);
+            assert.equal(r.json.error.code, 'forbidden_host');
+        }
+        const r = await raw(port, {headers: {host: '127.0.0.1:5787', origin: 'http://attacker.example:5787'}});
+        assert.equal(r.json.error.code, 'forbidden_origin');
+    } finally {
+        await proxied.close();
+    }
+    assert.throws(() => loadConfig({env: {PRINTMD_PROXY_PORT: 'x'}, argv: ['--local']}), /PRINTMD_PROXY_PORT must be a port number/);
+});
+
 /** The status line of a request written byte for byte on a socket. */
 function rawSocket(port, lines) {
     return new Promise((resolve) => {

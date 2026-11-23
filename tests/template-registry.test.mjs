@@ -413,7 +413,7 @@ test('the real registry: every manifest entry loads, in manifest order, with mat
 test('the real registry: the templates are all grouped or none is, so none is listed under "Other"; when grouped the default is "Current"', () => {
     const list = getTemplates();
     const ungrouped = list.filter((t) => !t.group).map((t) => t.manifest.id);
-    // No group anywhere is a flat picker (the public edition); a group on some and not on others puts the rest under "Other".
+    // No group anywhere is a flat picker (as here); a group on some and not on others puts the rest under "Other".
     if (ungrouped.length === list.length) return;
     assert.deepEqual(ungrouped, [], 'templates without a group');
     assert.equal(list[0].group, 'Current', 'the default template');
