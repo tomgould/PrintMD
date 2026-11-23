@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Template layers Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        iframe { width: 1px; height: 1px; border: 0; position: absolute; left: -10px; }
+    </style>
+</head>
+<body>
+<h1>Template layers in the browser: the real manifests, a module that never arrives, a core manifest that never answers</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<!--
+  Each broken-layer manifest (bad JSON, an HTML fallback, 500, a dropped connection, a missing
+  module, a taken id, no answer) is covered with the real fetch in tests/template-registry.test.mjs;
+  the whole editor booting with a broken layer or core manifest is tests/template-boot.test.html.
+  This page keeps what only a browser shows: the app's policy, the console line, and an import
+  that never finishes.
+-->
+<script type="module">
+    import {createHarness, assert} from './lib/harness.js';
+    import {assertFailureBanner, inFrame} from './lib/registry-cases.js';
+
+    const h = createHarness('LAYERS');
+    const core = await (await fetch('../templates/manifest.core.json')).json();
+    const CORE_IDS = core.templates.map((t) => t.id);
+    const cspOf = async (path) => new DOMParser().parseFromString(await (await fetch(path)).text(), 'text/html')
+        .querySelector('meta[http-equiv="Content-Security-Policy"]')?.content;
+
+    h.test('the case frame runs under the app\'s own Content-Security-Policy', async () => {
+        const app = await cspOf('../index.html');
+        assert(app && app.includes("script-src 'self'"), 'the app has a policy');
+        assert(await cspOf('lib/registry-frame.html') === app, 'tests/lib/registry-frame.html has the same policy as index.html');
+    });
+
+    h.test('the real manifests: every template, no warning', async () => {
+        const r = await inFrame('normal');
+        assert(!r.error, r.error);
+        assert(CORE_IDS.every((id) => r.ids.includes(id)), 'core templates: ' + r.ids);
+        assert(r.warnings.length === 0 && r.warns.length === 0, 'no warning: ' + r.warns);
+        assert(r.violations.length === 0, 'no policy violation: ' + r.violations);
+    });
+
+    h.test('a layer template whose import never finishes: skipped after the wait, with one console warning', async () => {
+        const r = await inFrame('moduleHang');
+        assert(!r.error, 'the registry did not fail: ' + r.error);
+        assert(JSON.stringify(r.ids) === JSON.stringify(CORE_IDS), 'core only: ' + r.ids);
+        assert(r.warnings.length === 1 && /"hang-co" could not be loaded \(no answer within 1500 ms\); it is skipped$/.test(r.warnings[0]),
+            'the warning: ' + r.warnings);
+        assert(r.warns.length === 1 && r.warns[0].includes(r.warnings[0]), 'one console line: ' + r.warns);
+    });
+
+    h.test('a core manifest that never answers: fatal after the wait, with the banner', async () => {
+        const r = await inFrame('coreHang');
+        assert(/manifest\.core\.json: no answer within 800 ms/.test(r.error), 'the registry failed: ' + r.error);
+        assert(r.aborted === true, 'the request is cancelled');
+        assertFailureBanner(r, 'BODY');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

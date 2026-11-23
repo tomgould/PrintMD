@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Office Export Growth Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+<h1>Word and PowerPoint export: linear growth and the slide cap</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script src="../vendor/jszip/jszip.min.js"></script>
+<!-- As in index.html: keep the browser's own trim and parseInt around pptxgen's core-js. -->
+<script src="../js/builtins-save.js"></script>
+<script src="../vendor/pptxgenjs/pptxgen.bundle.js"></script>
+<script src="../js/builtins-restore.js"></script>
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+    // Split from office-scale.test.html so neither page nears the runner's 30 s
+    // page limit on a slow CI CPU. Speed is judged by growth (tests/lib/growth.js).
+    import * as docx from '../js/docx-export.js';
+    import * as pptx from '../js/pptx-export.js';
+    import * as md from '../js/markdown.js';
+    import {getTemplates} from '../js/templates.js';
+    import * as growth from './lib/growth.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('OFFICE_GROWTH');
+    md.configureMarked();
+    const entry = getTemplates()[0];
+    const doc = {title: 'Big', author: '', date: ''};
+
+    h.test('trim grows linearly on inner white space (core-js\'s version is quadratic)', async () => {
+        const problem = await growth.checkLinear((s) => s.trim(), (n) => 'a' + ' '.repeat(n) + 'b', {n: 20000, capMs: 5000});
+        assert(!problem, problem);
+    });
+
+    h.test('Word export grows linearly with the paragraphs (2,500 vs 10,000)', async () => {
+        const make = (n) => '<h1>Big</h1><div>' + Array.from({length: n}, (_, i) => `<p>Para ${i}.</p>`).join('') + '</div>';
+        const problem = await growth.checkLinear((html) => docx.docxBlob(doc, entry, html, {onWarning: () => {}}), make,
+            {n: 2500, runs: 2, capMs: 20000});
+        assert(!problem, problem);
+    });
+
+    h.test('PowerPoint: a document needing more than 500 slides stops at 500, with a warning giving the count', async () => {
+        // 14,000 one-line paragraphs need about 560 portrait slides (25 to a slide).
+        const html = '<h1>Big</h1>' + Array.from({length: 14000}, (_, i) => `<p>Para ${i}.</p>`).join('');
+        const warnings = [];
+        const blob = await pptx.pptxBlob(doc, entry, html, {orientation: 'portrait', onWarning: (w) => warnings.push(w)});
+        const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+        const slides = Object.keys(zip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f)).length;
+        assert(slides === 501, `cover plus 500 content slides: ${slides}`);
+        const w = warnings.find(x => /stops at 500 slides/.test(x));
+        assert(w && /needs (\d+) slides/.test(w) && Number(/needs (\d+) slides/.exec(w)[1]) > 500, 'warning: ' + JSON.stringify(warnings));
+    });
+
+    h.run();
+</script>
+</body>
+</html>

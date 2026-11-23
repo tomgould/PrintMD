@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF Importer Hostile-Input Tests (part 2)</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>PDF importer on hostile text, header/footer removal, a hostile PDF and the app's built-ins: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+
+<!-- The app's startup scripts, in index.html's order (see importers-fuzz.test.html). -->
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script src="../vendor/jszip/jszip.min.js"></script>
+<script src="../js/builtins-save.js"></script>
+<script src="../vendor/pptxgenjs/pptxgen.bundle.js"></script>
+<script src="../js/builtins-restore.js"></script>
+<script type="module">
+    // The heavier half of the hostile-input checks, on their own page so neither
+    // page nears the runner's 30 s page limit on a slow CI CPU.
+    import * as pdfImport from '../js/pdf-import.js';
+    import * as growth from './lib/growth.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTERS_FUZZ_APP');
+
+    /** An untagged PDF: one array of text lines per page (the first line of each page at 24pt). */
+    function makePdf(pages) {
+        const esc = (s) => s.replace(/[\\()]/g, '\\$&');
+        const objs = ['<< /Type /Catalog /Pages 2 0 R >>', null, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+        const kids = [];
+        for (const lines of pages) {
+            const stream = lines.map((t, i) => `BT /F1 ${i === 0 ? 24 : 12} Tf 72 ${720 - i * 30} Td (${esc(t)}) Tj ET`).join('\n');
+            objs.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+            objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${objs.length} 0 R /Resources << /Font << /F1 3 0 R >> >> >>`);
+            kids.push(`${objs.length} 0 R`);
+        }
+        objs[1] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${kids.length} >>`;
+        let out = '%PDF-1.4\n';
+        const offs = [];
+        objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+        const xref = out.length;
+        out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+        out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+        return new File([out], 'built.pdf', {type: 'application/pdf'});
+    }
+
+    // The same hostile patterns as importers-fuzz.test.html.
+    const MB = 1 << 20;
+    const HOSTILE = {
+        'spaces then x': ' '.repeat(MB) + 'x',
+        'tabs then x': 'a' + '\t'.repeat(MB) + 'x',
+        'NBSP then x': 'a' + String.fromCharCode(0xa0).repeat(MB) + 'x',
+        'zero-width then x': 'a' + String.fromCharCode(0x200b).repeat(MB) + 'x',
+        'ZWNJ then x': 'a' + String.fromCharCode(0x200c).repeat(MB) + 'x',
+        'spaced dots': ' .'.repeat(MB / 2) + 'x',
+        'digits then x': '1'.repeat(MB) + 'x',
+        'impl repeated': 'impl '.repeat(MB / 5),
+        'fn a then spaces': 'fn a' + ' '.repeat(MB) + 'x',
+        'SELECT repeated': 'SELECT '.repeat(MB / 7),
+        'end repeated': 'end '.repeat(MB / 4),
+        'php arrow bait': '$a' + ' '.repeat(MB),
+        'json key bait': '"a"' + ' '.repeat(MB),
+        'colon then spaces': ':' + ' '.repeat(MB) + 'x',
+        'spaced capitals': 'A '.repeat(MB / 2) + 'aa',
+        'spaced letters': 'a '.repeat(MB / 2) + 'b',
+        'spaced capital lines': ('A B C D E F\n').repeat(MB / 12) + 'a',
+        'capital lines': ('A'.repeat(50) + '\n').repeat(MB / 51) + 'a',
+        'blank lines': 'a' + '\n'.repeat(MB) + 'b',
+        'one long word': 'a'.repeat(MB),
+        'entities': '&lt'.repeat(MB / 3) + ';',
+        'dashes': '- '.repeat(MB / 2) + 'x',
+        'urls': 'xhttp://'.repeat(MB / 8),
+        'page bait': 'page 1' + ' '.repeat(MB) + 'x',
+        'hash heading bait': '## ' + ' '.repeat(MB) + 'x',
+    };
+    const SIZE = 16 * 1024;
+    const CAP_MS = 2000;
+    const sized = (pattern) => (n) => pattern.slice(0, n) + pattern.slice(-1);
+    const hostileLine = (text) => ({text, pageNum: 1, pageY: 790, pageHeight: 800, isMono: false, fontSize: 12, x: 72});
+
+    h.test('hostile inputs: removeRunningElements grows linearly on every pattern', async () => {
+        const run = (s) => pdfImport.removeRunningElements([hostileLine(s), hostileLine(s)], 2);
+        const problems = [];
+        for (const [label, pattern] of Object.entries(HOSTILE)) {
+            const problem = await growth.checkLinear(run, sized(pattern), {n: SIZE, capMs: CAP_MS});
+            if (problem) problems.push(`${label}: ${problem}`);
+        }
+        assert(problems.length === 0, problems.join('; '));
+    });
+
+    h.test('hostile inputs: a PDF line of "fn a" plus spaces imports in linear time', async () => {
+        const make = (n) => makePdf([['Hostile', 'fn a' + ' '.repeat(n) + 'x', 'body', 'more body']]);
+        const out = await pdfImport.pdfToMarkdown(make(1000));
+        assert(/Hostile/.test(out), 'converted');
+        const problem = await growth.checkLinear((file) => pdfImport.pdfToMarkdown(file), make, {n: 20000, runs: 2, capMs: 10000});
+        assert(!problem, problem);
+    });
+
+    h.test('the app page keeps the browser\'s own trim and parseInt (no quadratic polyfill)', async () => {
+        const frame = document.createElement('iframe');
+        frame.style.cssText = 'width:800px;height:400px;border:0';
+        document.body.appendChild(frame);
+        try {
+            frame.src = '../index.html';
+            await new Promise(res => frame.addEventListener('load', res, {once: true}));
+            const w = frame.contentWindow;
+            const inner = (n) => 'fn a' + ' '.repeat(n) + 'x';
+            const leading = (n) => ' '.repeat(n) + '7 ';
+            const problems = [];
+            for (const [name, [call, make]] of Object.entries({
+                trim: [(s) => w.String.prototype.trim.call(s), inner], trimEnd: [(s) => w.String.prototype.trimEnd.call(s), inner],
+                trimStart: [(s) => w.String.prototype.trimStart.call(s), leading],
+                'Number.parseInt': [(s) => w.Number.parseInt(s), leading], parseFloat: [(s) => w.parseFloat(s), leading],
+            })) {
+                // 20K and 80K characters: core-js's quadratic trim takes most of a second at 80K, about
+                // 4x four runs at 20K, while the browser's own trim takes under 1 ms.
+                const problem = await growth.checkLinear(call, make, {n: 20000, capMs: CAP_MS});
+                if (problem) problems.push(`${name}: ${problem}`);
+            }
+            assert(problems.length === 0, 'built-ins in the app page are not linear: ' + problems.join('; '));
+        } finally {
+            frame.remove();
+        }
+    });
+
+    h.run();
+</script>
+</body>
+</html>

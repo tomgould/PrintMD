@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Folder App Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        iframe { width: 1400px; height: 900px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>Open folder in the app: real, storable directory handles (the origin private file system stands in for the picker)</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<iframe id="app" title="app under test"></iframe>
+<script type="module">
+    import * as store from '../js/store.js';
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+
+    const h = createHarness('FOLDERAPP');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const frame = document.getElementById('app');
+    let win, doc;
+
+    async function waitFor(fn, what, ms = 8000) {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+            try { if (await fn()) return; } catch (_e) { /* not ready */ }
+            await sleep(30);
+        }
+        throw new Error('timed out waiting for ' + what);
+    }
+
+    async function boot(reload = false) {
+        const loaded = new Promise(res => frame.addEventListener('load', res, {once: true}));
+        if (reload) frame.contentWindow.location.reload(); else frame.src = '../index.html';
+        await loaded;
+        win = frame.contentWindow;
+        doc = frame.contentDocument;
+        await waitFor(() => win.__bd && win.__bd.docManager.currentId != null && !doc.getElementById('editor').readOnly, 'app boot');
+    }
+
+    async function write(dir, name, text) {
+        const fh = await dir.getFileHandle(name, {create: true});
+        const w = await fh.createWritable();
+        await w.write(text);
+        await w.close();
+    }
+
+    const rows = () => [...doc.querySelectorAll('.folder-group[data-folder-id] .doc-title')].map((t) => t.textContent);
+    const editorText = () => doc.getElementById('editor').value;
+    const storedByPath = async (path) => (await store.listRecent(Infinity)).find((d) => d.folderPath === path);
+
+    h.test('open a folder, follow edits, additions and removals, survive a reload, then Close all in folder', async () => {
+        await resetStorage(store);
+        localStorage.removeItem('printmd-folders');
+        localStorage.removeItem('printmd-folder-hidden');
+        localStorage.removeItem('printmd-folder-collapsed');
+        const root = await navigator.storage.getDirectory();
+        const name = 'printmd-folder-test-' + Date.now();
+        const dir = await root.getDirectoryHandle(name, {create: true});
+        try {
+            await write(dir, 'a.md', '# A');
+            await write(dir, 'b.md', '# B');
+            await boot();
+            win.showDirectoryPicker = async () => dir;
+            doc.getElementById('sidebar-open-folder').click();
+            await waitFor(() => rows().length === 2, 'two files listed');
+            assert(JSON.stringify(rows()) === '["a.md","b.md"]', JSON.stringify(rows()));
+            assert(doc.querySelector('.folder-group[data-folder-id] .folder-name').textContent === name, 'section named after the folder');
+            assert(doc.querySelector('.folder-group[data-folder-id] .folder-toggle').getAttribute('aria-expanded') === 'false', 'the folder opens closed');
+            await waitFor(() => editorText() === '# A', 'a.md open');
+
+            // An edit to a file that is not open updates its stored copy.
+            await sleep(20);
+            await write(dir, 'b.md', '# B, edited outside');
+            await win.__bd.folderSync.checkAll();
+            assert((await storedByPath('b.md')).snapshot === '# B, edited outside', 'b.md updated');
+
+            // An edit to the open file reloads the editor (through the open doc's own check).
+            await sleep(20);
+            await write(dir, 'a.md', '# A, edited outside');
+            await win.__bd.folderSync.checkAll();
+            await waitFor(() => editorText() === '# A, edited outside', 'open file reloaded');
+            await waitFor(() => doc.querySelector('#preview').textContent.includes('A, edited outside'), 'preview follows');
+
+            // A new file appears; removing the open file opens another doc in its place.
+            await write(dir, 'c.md', '# C');
+            await dir.removeEntry('a.md');
+            await win.__bd.folderSync.checkAll();
+            await waitFor(() => JSON.stringify(rows()) === '["b.md","c.md"]', 'c.md added, a.md closed: ' + JSON.stringify(rows()));
+            await waitFor(() => !editorText().startsWith('# A'), 'another doc is open');
+            assert(!(await storedByPath('a.md')), 'a.md deleted from the store');
+
+            // After a reload the folder comes back from IndexedDB (handles included) and is watched.
+            await boot(true);
+            await waitFor(() => rows().length === 2, 'folder listed after a reload');
+            assert(doc.querySelector('.folder-group[data-folder-id] .folder-toggle').getAttribute('aria-expanded') === 'false', 'closed after a reload');
+            const folder = win.__bd.folderSync.list()[0];
+            assert(folder && folder.status === 'ok', 'watched after a reload: ' + (folder && folder.status));
+            await write(dir, 'd.md', '# D');
+            await win.__bd.folderSync.checkAll();
+            await waitFor(() => rows().includes('d.md'), 'd.md added after a reload');
+
+            // A file in a new subfolder: listed under a closed folder row named after it.
+            const part = await dir.getDirectoryHandle('part', {create: true});
+            await write(part, 'e.md', '# E');
+            await win.__bd.folderSync.checkAll();
+            await waitFor(() => doc.querySelector('.folder-group[data-folder-id] .dir-item[data-path="part"]'), 'the part folder row');
+            const partRow = doc.querySelector('.dir-item[data-path="part"]');
+            assert(partRow.querySelector('.dir-toggle').getAttribute('aria-expanded') === 'false', 'closed at first');
+            assert([...partRow.querySelectorAll('.doc-title')].map((t) => t.textContent).join() === 'e.md', 'e.md under it');
+
+            // Close all in folder: no question (nothing unsaved), the files stay on disk.
+            const asked = [];
+            win.confirm = (m) => { asked.push(m); return true; };
+            doc.querySelector('.folder-close').click();
+            await waitFor(() => !doc.querySelector('.folder-group[data-folder-id]'), 'section gone');
+            assert(asked.length === 0, 'no question: ' + asked.join(' | '));
+            assert((await store.listRecent(Infinity)).every((d) => !d.folderId), 'no folder docs left');
+            const left = [];
+            for await (const e of dir.values()) left.push(e.name);
+            assert(JSON.stringify(left.sort()) === '["b.md","c.md","d.md","part"]', 'files untouched: ' + JSON.stringify(left));
+        } finally {
+            await root.removeEntry(name, {recursive: true}).catch(() => {});
+        }
+    });
+
+    h.test('default folders: saved, closed, back after a reload (closed, in order); after a site data clear, loaded from the file', async () => {
+        await resetStorage(store);
+        for (const k of ['printmd-folders', 'printmd-folder-hidden', 'printmd-defaults-hint-dismissed']) localStorage.removeItem(k);
+        const root = await navigator.storage.getDirectory();
+        const stamp = Date.now();
+        const names = ['Notes-' + stamp, 'Book-' + stamp];
+        const dirs = [];
+        try {
+            for (const n of names) dirs.push(await root.getDirectoryHandle(n, {create: true}));
+            await write(dirs[0], 'todo.md', '# Todo');
+            await write(dirs[0], 'ideas.md', '# Ideas');
+            const ch = await dirs[1].getDirectoryHandle('chapters', {create: true});
+            await write(dirs[1], 'intro.md', '# Intro');
+            await write(ch, 'one.md', '# One');
+            await boot();
+            const groups = () => [...doc.querySelectorAll('.folder-group[data-folder-id]')].map((g) => g.querySelector('.folder-name').textContent);
+            const notice = () => doc.getElementById('folder-notice');
+            assert(!doc.getElementById('folders-menu').hidden, 'the Defaults menu is shown where folders can be opened');
+            await waitFor(() => !notice().hidden, 'the hint on a fresh profile');
+            assert(doc.getElementById('folder-notice-action').textContent === 'Load defaults from file...', 'hint offers the file');
+
+            for (const d of dirs) {
+                win.showDirectoryPicker = async () => d;
+                doc.getElementById('sidebar-open-folder').click();
+                await waitFor(() => groups().includes(d.name), d.name + ' listed');
+            }
+            assert(notice().hidden, 'no hint with folders open');
+            await waitFor(() => editorText() === '# Intro', 'intro.md open');
+            doc.getElementById('folders-save-defaults').click();
+            await waitFor(async () => { const v = await win.__bd.defaultsStore.get(); return v && v.folders.length === 2; }, 'defaults stored');
+            const saved = await win.__bd.defaultsStore.get();
+            assert(JSON.stringify(saved.folders.map((f) => f.name)) === JSON.stringify([names[1], names[0]]), 'in the sidebar order: ' + JSON.stringify(saved.folders.map((f) => f.name)));
+            assert(saved.openFile && saved.openFile.folder === names[1] && saved.openFile.path === 'intro.md', 'the open file: ' + JSON.stringify(saved.openFile));
+
+            // The defaults file, as Save defaults to file writes it.
+            let fileText = null;
+            win.URL.createObjectURL = (blob) => { blob.text().then((t) => { fileText = t; }); return 'about:blank'; };
+            win.HTMLAnchorElement.prototype.click = function () {};
+            doc.getElementById('folders-save-file').click();
+            await waitFor(() => fileText, 'the defaults file');
+            assert(JSON.stringify(JSON.parse(fileText).folders) === JSON.stringify([{name: names[1]}, {name: names[0]}]), fileText);
+
+            // Close both folders: the defaults bring them back after a reload (a restart).
+            win.confirm = () => true;
+            while (doc.querySelector('.folder-close')) {
+                const n = groups().length;
+                doc.querySelector('.folder-close').click();
+                await waitFor(() => groups().length === n - 1, 'a folder closed');
+            }
+            assert((await store.listRecent(Infinity)).every((d) => !d.folderId), 'no folder docs left');
+            await boot(true);
+            await waitFor(() => groups().length === 2, 'both default folders back after a reload');
+            assert(JSON.stringify(groups()) === JSON.stringify([names[1], names[0]]), 'same order: ' + JSON.stringify(groups()));
+            const toggles = [...doc.querySelectorAll('.folder-group[data-folder-id] .folder-toggle')];
+            assert(toggles.every((t) => t.getAttribute('aria-expanded') === 'false'), 'both closed');
+            assert(doc.querySelector('.dir-item[data-path="chapters"] .dir-toggle').getAttribute('aria-expanded') === 'false', 'the subfolder closed');
+            assert(JSON.stringify(win.__bd.folderSync.list().map((f) => f.docs.length + ':' + f.status)) === '["2:ok","2:ok"]',
+                JSON.stringify(win.__bd.folderSync.list().map((f) => f.docs.length + ':' + f.status)));
+            assert(notice().hidden, 'no hint with defaults saved');
+
+            // As after a restart where the browser asks again: the stored handles need access, Reconnect reads them.
+            while (doc.querySelector('.folder-close')) {
+                const n = groups().length;
+                doc.querySelector('.folder-close').click();
+                await waitFor(() => groups().length === n - 1, 'a folder closed');
+            }
+            const proto = win.FileSystemDirectoryHandle.prototype;
+            const realQuery = proto.queryPermission;
+            const realRequest = proto.requestPermission;
+            let allowed = false;
+            proto.queryPermission = function (o) { return allowed ? realQuery.call(this, o) : Promise.resolve('prompt'); };
+            proto.requestPermission = function (o) { allowed = true; return realRequest.call(this, o); };
+            try {
+                await win.__bd.restoreDefaults();
+                await waitFor(() => doc.querySelectorAll('.folder-reconnect').length === 2, 'Reconnect on both');
+                assert(win.__bd.folderSync.list().every((f) => f.status === 'needs-permission' && f.docs.length === 0), 'waiting, no files yet');
+                assert(!notice().hidden && doc.getElementById('folder-notice-action').textContent === 'Reconnect all', 'Reconnect all offered');
+                doc.querySelector('.folder-reconnect').click();
+                await waitFor(() => win.__bd.folderSync.list().some((f) => f.status === 'ok' && f.docs.length === 2), 'one folder read');
+                doc.querySelector('.folder-reconnect').click();
+                await waitFor(() => win.__bd.folderSync.list().every((f) => f.status === 'ok' && f.docs.length === 2), 'both read');
+                assert((await store.listRecent(Infinity)).filter((d) => d.folderId).length === 4, 'their files stored');
+            } finally {
+                proto.queryPermission = realQuery;
+                proto.requestPermission = realRequest;
+            }
+
+            // A site data clear: both databases and localStorage gone. The hint offers the file.
+            win.__bd.docManager.flushOnLeave && win.__bd.docManager.flushOnLeave();
+            frame.src = 'about:blank';
+            await sleep(100);
+            await resetStorage(store);
+            localStorage.clear();
+            await boot();
+            await waitFor(() => !notice().hidden, 'the hint after a clear');
+            assert(groups().length === 0, 'no folders after a clear');
+            const picks = [dirs[1], dirs[1]];   // the second pick is the wrong folder: warned, still opened
+            win.showDirectoryPicker = async () => picks.shift();
+            const applied = win.__bd.applyDefaultsFile(fileText);
+            const modal = doc.getElementById('defaults-modal');
+            await waitFor(() => !modal.hidden, 'the Load dialog');
+            const rows = [...modal.querySelectorAll('.defaults-row')];
+            assert(JSON.stringify(rows.map((r) => r.querySelector('.defaults-name').textContent)) === JSON.stringify([names[1], names[0]]), 'one row per expected folder');
+            rows[0].querySelector('.defaults-choose').click();
+            await waitFor(() => rows[0].querySelector('.defaults-status').textContent === 'Chosen', 'first chosen');
+            rows[1].querySelector('.defaults-choose').click();
+            await waitFor(() => rows[1].classList.contains('defaults-mismatch'), 'the wrong folder is warned about');
+            picks.push(dirs[0]);
+            rows[1].querySelector('.defaults-choose').click();
+            await waitFor(() => rows[1].querySelector('.defaults-status').textContent === 'Chosen', 'changed to the right folder');
+            modal.querySelector('[data-role="open"]').click();
+            assert(await applied === 'opened', 'opened');
+            await waitFor(() => groups().length === 2, 'both folders back from the file');
+            assert(JSON.stringify(groups()) === JSON.stringify([names[1], names[0]]), 'same order: ' + JSON.stringify(groups()));
+            assert([...doc.querySelectorAll('.folder-group[data-folder-id] .folder-toggle')].every((t) => t.getAttribute('aria-expanded') === 'false'), 'closed');
+            await waitFor(() => editorText() === '# Intro', 'the file that was open is open again');
+            assert(notice().hidden, 'hint gone');
+            const again = await win.__bd.defaultsStore.get();
+            assert(again && again.folders.length === 2, 'saved as the defaults again');
+
+            // A file that is not a defaults file is refused before any dialog.
+            assert(await win.__bd.applyDefaultsFile('{"kind":"nope"}') === 'invalid', 'refused');
+            assert(modal.hidden, 'no dialog for a bad file');
+        } finally {
+            for (const n of names) await root.removeEntry(n, {recursive: true}).catch(() => {});
+        }
+    });
+
+    h.test('Reconnect all shows when two default folders wait for access', async () => {
+        // Stand-in handles that need access again (empty, so nothing of them is stored: IndexedDB cannot keep them).
+        const fakeDir = (name) => {
+            const d = {kind: 'directory', name, perm: 'prompt', asked: 0,
+                async *values() {},
+                async isSameEntry(o) { return o === d; },
+                async queryPermission() { return d.perm; },
+                async requestPermission() { d.asked++; d.perm = 'granted'; return 'granted'; }};
+            return d;
+        };
+        frame.src = 'about:blank';
+        await sleep(100);
+        await resetStorage(store);
+        localStorage.clear();
+        await boot();
+        await win.__bd.whenLoaded();   // the folders the app lists at startup are in: restore() adds to them
+        const one = fakeDir('one');
+        const two = fakeDir('two');
+        await win.__bd.folderSync.restore([{name: 'one', handle: one}, {name: 'two', handle: two}]);
+        await waitFor(() => doc.getElementById('folder-notice-action').textContent === 'Reconnect all' && !doc.getElementById('folder-notice').hidden, 'Reconnect all');
+        assert(doc.getElementById('folder-notice-text').textContent === '2 folders need access again.', doc.getElementById('folder-notice-text').textContent);
+        await waitFor(() => doc.querySelectorAll('.folder-reconnect').length === 2, 'each folder keeps its Reconnect');
+        doc.getElementById('folder-notice-action').click();
+        await waitFor(() => win.__bd.folderSync.list().every((f) => f.status === 'ok'), 'both reconnected');
+        assert(one.asked === 1 && two.asked === 1, 'each asked once');
+        await waitFor(() => doc.getElementById('folder-notice-action').dataset.action !== 'reconnect-all' || doc.getElementById('folder-notice').hidden, 'notice moves on');
+        // Close all on a default folder with no files: the section goes, no question.
+        const asked = [];
+        win.confirm = (m) => { asked.push(m); return true; };
+        await win.__bd.folderSync.restore([{name: 'three', handle: fakeDir('three')}]);
+        await waitFor(() => doc.querySelectorAll('.folder-group[data-folder-id]').length === 3, 'three listed');
+        const three = [...doc.querySelectorAll('.folder-group[data-folder-id]')].find((g) => g.querySelector('.folder-name').textContent === 'three');
+        three.querySelector('.folder-close').click();
+        await waitFor(() => doc.querySelectorAll('.folder-group[data-folder-id]').length === 2, 'its section goes');
+        assert(asked.length === 0, 'no question: ' + asked.join(' | '));
+        win.__bd.folderSync.stop();
+    });
+
+    h.run();
+</script>
+</body>
+</html>

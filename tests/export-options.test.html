@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Export Options Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        #app { width: 1200px; height: 700px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>Export option validation tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<iframe id="app" title="app under test"></iframe>
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as pdfExport from '../js/pdf-export.js';
+    import * as printDoc from '../js/print-document.js';
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+
+    // Dynamic import: a missing module fails its tests, not the whole page.
+    const eo = await import('../js/export-options.js').catch(() => ({}));
+    const h = createHarness('EXPORTOPTS');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const HOSTILE = 'A4; } body { display:none';
+    const EXPORT_OPTS_KEY = 'printmd-export-opts';
+
+    h.test('valid options pass through unchanged', () => {
+        for (const pageSize of ['A4', 'A3', 'A5', 'Letter', 'Legal']) {
+            for (const orientation of ['portrait', 'landscape']) {
+                const o = eo.normalizeExportOpts({format: 'docx', pageSize, orientation, margin: '12.5mm'});
+                assert(o.pageSize === pageSize && o.orientation === orientation, `${pageSize} ${orientation}`);
+                assert(o.format === 'docx' && o.margin === '12.5mm', 'format and margin kept');
+            }
+        }
+        for (const m of ['0mm', '20mm', '2cm', '1in', '0.75in', '36pt', '100mm']) {
+            assert(eo.normalizeExportOpts({margin: m}).margin === m, 'margin kept: ' + m);
+        }
+    });
+
+    h.test('a hostile page size is rejected and falls back to the default', () => {
+        const o = eo.normalizeExportOpts({pageSize: HOSTILE, orientation: 'landscape'});
+        assert(o.pageSize === 'A4', 'fell back to A4, got ' + o.pageSize);
+        assert(o.orientation === 'landscape', 'valid orientation kept');
+    });
+
+    h.test('hostile or unknown orientation, margin and format are rejected', () => {
+        const bad = eo.normalizeExportOpts({
+            orientation: 'portrait; } * { color: red', margin: '20mm; } body { display: none', format: 'html',
+        });
+        assert(bad.orientation === 'portrait', 'orientation default, got ' + bad.orientation);
+        assert(bad.margin === '20mm', 'margin default, got ' + bad.margin);
+        assert(bad.format === 'pdf', 'format default, got ' + bad.format);
+        for (const m of ['1000mm', '101mm', '11cm', '5in', '300pt', '-5mm', '20 mm', '20px', '20', 'mm', '1e2mm',
+            '20mm ', ' 20mm', 'calc(20mm)', '20mm\n']) {
+            assert(eo.normalizeExportOpts({margin: m}).margin === '20mm', 'margin rejected: ' + JSON.stringify(m));
+        }
+        for (const s of ['a4', 'Tabloid ', 'Letter;', '', null, 42, {}, '__proto__', 'toString']) {
+            assert(eo.normalizeExportOpts({pageSize: s}).pageSize === 'A4', 'page size rejected: ' + JSON.stringify(s));
+        }
+    });
+
+    h.test('non-object input gives the defaults', () => {
+        for (const v of [undefined, null, 'A4', 7, ['A3']]) {
+            const o = eo.normalizeExportOpts(v);
+            assert(o.pageSize === 'A4' && o.orientation === 'portrait' && o.margin === '20mm' && o.format === 'pdf',
+                'defaults for ' + JSON.stringify(v));
+        }
+    });
+
+    h.test('a custom margin fallback is used when the margin is invalid', () => {
+        assert(eo.normalizeExportOpts({margin: 'bad'}, {margin: '22mm'}).margin === '22mm', 'fallback used');
+    });
+
+    h.test('buildPageCss never emits a hostile value', () => {
+        const css = printDoc.buildPageCss({pageSize: HOSTILE, orientation: 'landscape } x {', margin: '1mm } y {'});
+        assert(!/display|}\s*body|x \{|y \{/.test(css.replace('@page :first { margin: 0; }', '')), 'no injection: ' + css);
+        assert(css.startsWith('@page { size: A4 portrait; margin: 20mm; }'), 'defaults used: ' + css);
+    });
+
+    h.test('exportPDF validates options before writing @page CSS', async () => {
+        let written = '';
+        const fakeWin = {
+            closed: false,
+            document: {readyState: 'loading', fonts: {ready: Promise.resolve()}, open() {}, write(s) { written += s; },
+                close() { this.readyState = 'complete'; }},
+            addEventListener(type, fn) { if (type === 'load') setTimeout(fn, 0); }, removeEventListener() {}, focus() {}, print() {}, close() {},
+        };
+        // A prepared export whose page options were never validated still prints validated CSS.
+        const prepared = {doc: {title: 'T'}, bodyHTML: '<p>x</p>', coverHTML: '', pageOpts: {pageSize: HOSTILE, margin: '9mm;}*{display:none'}};
+        await pdfExport.exportPDF(prepared, {manifest: {id: 'x'}, styles: ''}, {openWindow: () => fakeWin});
+        assert(written.includes('@page { size: A4 portrait; margin: 20mm; }'), 'validated @page written');
+        assert(!written.includes('display:none'), 'hostile CSS not written');
+    });
+
+    h.test('a hostile stored option is rejected when the app restores it', async () => {
+        await resetStorage();
+        localStorage.setItem(EXPORT_OPTS_KEY, JSON.stringify({format: 'pdf', pageSize: HOSTILE, orientation: 'landscape'}));
+        const frame = document.getElementById('app');
+        frame.src = '../index.html';
+        await new Promise(res => frame.addEventListener('load', res, {once: true}));
+        const win = frame.contentWindow;
+        const end = Date.now() + 6000;
+        while (!(win.__bd && win.__bd.docManager.currentId != null) && Date.now() < end) await sleep(50);
+        const sel = frame.contentDocument.querySelector('#toolbar-nav #export-paper-size');
+        assert(sel.value === 'A4', 'paper select shows A4, got ' + JSON.stringify(sel.value));
+        assert(frame.contentDocument.querySelector('#toolbar-nav #export-orientation').value === 'landscape', 'orientation kept');
+        frame.src = 'about:blank';
+        await sleep(100);
+        localStorage.removeItem(EXPORT_OPTS_KEY);
+        await resetStorage();
+    });
+
+    h.run();
+</script>
+</body>
+</html>

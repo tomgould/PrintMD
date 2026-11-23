@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PowerPoint Export Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+<h1>pptx-export.js and slides.js</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script src="../vendor/jszip/jszip.min.js"></script>
+<!-- As in index.html: keep the browser's own trim and parseInt around pptxgen's core-js. -->
+<script src="../js/builtins-save.js"></script>
+<script src="../vendor/pptxgenjs/pptxgen.bundle.js"></script>
+<script src="../js/builtins-restore.js"></script>
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as pptx from '../js/pptx-export.js';
+    import * as pipeline from '../js/export-pipeline.js';
+    import * as md from '../js/markdown.js';
+    import {getTemplates} from '../js/templates.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    // The fixture this page builds is also handed to tests/office-convert.mjs
+    // (window.__officeFiles, with the slide count it expects in __officeExpect).
+    window.__officeFiles = {};
+    window.__officeExpect = {};
+
+    const h = createHarness('PPTX');
+    md.configureMarked();
+    const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+
+    /** A 120x60 PNG: red on the left half, blue on the right. */
+    function pngDataUri() {
+        const c = document.createElement('canvas');
+        c.width = 120;
+        c.height = 60;
+        const g = c.getContext('2d');
+        g.fillStyle = '#d62828';
+        g.fillRect(0, 0, 60, 60);
+        g.fillStyle = '#1d4ed8';
+        g.fillRect(60, 0, 60, 60);
+        return c.toDataURL('image/png');
+    }
+
+    const LONG = Array.from({length: 30}, (_, i) => `${i + 1}. Long line ${i + 1}`);
+    // C0 controls (not tab or newline), U+FFFE, U+FFFF and an unpaired surrogate.
+    const BAD = '\u0001\u0008\u000B\u001F' + String.fromCharCode(0xfffe, 0xffff, 0xd800);
+    const fixtureMd = () => [
+        '---',
+        'title: Deck Fixture',
+        'author: Sam Presenter',
+        'date: 2026-03-01',
+        '---',
+        '# Opening',
+        '',
+        'First paragraph of the slide.',
+        '',
+        'Second paragraph, with &amp;lt; shown literally and **bold** text.',
+        '',
+        '## Code',
+        '',
+        '```js',
+        'const answer = 42;',
+        '  console.log(answer);',
+        '```',
+        '',
+        '## Table',
+        '',
+        '| Name | Value |',
+        '|------|------:|',
+        '| Alpha | 1 |',
+        '| Beta | 2 |',
+        '',
+        '## Image',
+        '',
+        `![Two colours](${pngDataUri()})`,
+        '',
+        '![Remote](https://example.com/remote.png)',
+        '',
+        '## Long section',
+        '',
+        ...LONG,
+        '',
+        '## Nested',
+        '',
+        '- Outer item',
+        '  - Inner item',
+        '1. First numbered',
+        '2. Second numbered',
+        '',
+        // Characters XML 1.0 forbids, in every kind of text that reaches the deck.
+        `## Bad${BAD}title`,
+        '',
+        `Para${BAD}text with a <a href="https://example.com/a${BAD}b">bad${BAD}link</a>.`,
+        '',
+        `- item${BAD}one`,
+        '',
+        `| h${BAD} |`,
+        '|---|',
+        `| c${BAD} |`,
+        '',
+        `![alt${BAD}](${pngDataUri()})`,
+        '',
+    ].join('\n');
+
+    let cached = null;
+    async function fixture() {
+        if (cached) return cached;
+        const entry = getTemplates()[0];
+        const prepared = pipeline.prepareExport(fixtureMd(), entry, {date: new Date(2026, 0, 15), orientation: 'landscape'});
+        const warnings = [];
+        const blob = await pptx.pptxBlob(prepared.doc, entry, prepared.bodyHTML, {...prepared.pageOpts, onWarning: (w) => warnings.push(w)});
+        const buf = await blob.arrayBuffer();
+        const zip = await JSZip.loadAsync(buf);
+        const parts = {};
+        for (const name of Object.keys(zip.files)) {
+            if (!zip.files[name].dir && /\.(xml|rels)$/.test(name)) parts[name] = await zip.file(name).async('string');
+        }
+        const parse = (name) => new DOMParser().parseFromString(parts[name], 'application/xml');
+        const slideCount = Object.keys(parts).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)).length;
+        const slides = Array.from({length: slideCount}, (_, i) => parse(`ppt/slides/slide${i + 1}.xml`));
+        const bytes = new Uint8Array(buf);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        window.__officeFiles['fixture.pptx'] = btoa(bin);
+        window.__officeExpect['fixture.pptx'] = {slides: slideCount};
+        cached = {zip, parts, parse, slides, warnings, prepared};
+        return cached;
+    }
+
+    const all = (node, local, ns = A) => Array.from(node.getElementsByTagNameNS(ns, local));
+    const texts = (el) => all(el, 't').map(t => t.textContent);
+    const paras = (el) => all(el, 'p').map(p => texts(p).join(''));
+    /** The slide whose first text (the title) is `title`. */
+    const slideTitled = (slides, title) => slides.find(s => paras(s).includes(title));
+
+    h.test('every XML part parses, also with XML-illegal characters in the source', async () => {
+        const {parts, parse, slides} = await fixture();
+        for (const name of Object.keys(parts)) {
+            const err = parse(name).getElementsByTagName('parsererror')[0];
+            assert(!err, `${name}: ${err && err.textContent.slice(0, 160)}`);
+        }
+        const illegal = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u{FFFE}\u{FFFF}\u{D800}-\u{DFFF}]/u;
+        for (const name of Object.keys(parts)) assert(!illegal.test(parts[name]), name + ' holds no XML-illegal character');
+        assert(slideTitled(slides, 'Badtitle'), 'the title keeps its text');
+        const bad = slideTitled(slides, 'Badtitle');
+        assert(paras(bad).some(p => p.startsWith('Paratext with a badlink')), 'paragraph and link text kept: ' + JSON.stringify(paras(bad)));
+    });
+
+    h.test('every paragraph has at most one a:pPr, as its first child; a:endParaRPr comes last', async () => {
+        const {slides} = await fixture();
+        let checked = 0;
+        slides.forEach((slide, i) => {
+            for (const p of all(slide, 'p')) {
+                const kids = Array.from(p.children).map(c => c.localName);
+                const pPr = kids.filter(k => k === 'pPr').length;
+                assert(pPr <= 1, `slide ${i + 1}: ${pPr} a:pPr in "${texts(p).join('')}"`);
+                assert(pPr === 0 || kids[0] === 'pPr', `slide ${i + 1}: a:pPr not first in "${texts(p).join('')}": ${kids.join(',')}`);
+                assert(!kids.includes('endParaRPr') || kids[kids.length - 1] === 'endParaRPr', `slide ${i + 1}: endParaRPr not last`);
+                checked++;
+            }
+        });
+        assert(checked > 50, 'checked ' + checked + ' paragraphs');
+    });
+
+    h.test('one slide per section plus the cover', async () => {
+        const {slides} = await fixture();
+        for (const t of ['Opening', 'Code', 'Table', 'Image', 'Long section', 'Long section (cont.)', 'Nested']) {
+            assert(slideTitled(slides, t), 'slide titled ' + t);
+        }
+        assert(paras(slides[0]).includes('Deck Fixture'), 'cover first');
+    });
+
+    h.test('two paragraphs stay two paragraphs (breakLine)', async () => {
+        const {slides} = await fixture();
+        const ps = paras(slideTitled(slides, 'Opening'));
+        assert(ps.includes('First paragraph of the slide.'), 'first paragraph on its own: ' + JSON.stringify(ps));
+        assert(ps.some(p => p.startsWith('Second paragraph')), 'second paragraph on its own');
+    });
+
+    h.test('entities decode once: &amp;lt; shows as &lt;', async () => {
+        const {slides} = await fixture();
+        const p = paras(slideTitled(slides, 'Opening')).find(t => t.startsWith('Second paragraph'));
+        assert(p && p.includes('with &lt; shown literally'), 'text: ' + p);
+    });
+
+    h.test('inline bold survives as a bold run', async () => {
+        const {slides} = await fixture();
+        const run = all(slideTitled(slides, 'Opening'), 'r').find(r => texts(r).join('') === 'bold');
+        assert(run && all(run, 'rPr')[0].getAttribute('b') === '1', 'bold run');
+    });
+
+    h.test('code blocks sit in a filled box in a monospace font, one paragraph per line', async () => {
+        const {slides} = await fixture();
+        const slide = slideTitled(slides, 'Code');
+        const sp = all(slide, 'sp', 'http://schemas.openxmlformats.org/presentationml/2006/main')
+            .find(s => texts(s).join('').includes('const answer = 42;'));
+        assert(sp, 'code shape found');
+        const spPr = all(sp, 'spPr', 'http://schemas.openxmlformats.org/presentationml/2006/main')[0];
+        assert(spPr && all(spPr, 'solidFill').length > 0, 'the box has a background fill');
+        assert(all(sp, 'latin').some(l => /Courier|Consolas|Mono/i.test(l.getAttribute('typeface'))), 'monospace typeface');
+        const ps = paras(sp);
+        assert(ps.includes('const answer = 42;') && ps.includes('  console.log(answer);'), 'lines kept with indent: ' + JSON.stringify(ps));
+    });
+
+    h.test('tables use a real table with a styled header row', async () => {
+        const {slides} = await fixture();
+        const slide = slideTitled(slides, 'Table');
+        const tbl = all(slide, 'tbl')[0];
+        assert(tbl, 'a:tbl present');
+        const rows = all(tbl, 'tr');
+        assert(rows.length === 3, '3 rows: ' + rows.length);
+        const header = all(rows[0], 'tc');
+        assert(header.map(c => texts(c).join('')).join('|') === 'Name|Value', 'header cells');
+        assert(all(header[0], 'solidFill').length > 0, 'header cell filled');
+        assert(all(header[0], 'rPr').some(r => r.getAttribute('b') === '1'), 'header text bold');
+        assert(all(rows[2], 'tc').map(c => texts(c).join('')).join('|') === 'Beta|2', 'body cells');
+    });
+
+    h.test('data: images are embedded; other images are skipped with a warning', async () => {
+        const {slides, parts, warnings, zip} = await fixture();
+        const idx = slides.indexOf(slideTitled(slides, 'Image')) + 1;
+        const pics = all(slides[idx - 1], 'pic', 'http://schemas.openxmlformats.org/presentationml/2006/main');
+        assert(pics.length === 1, 'one picture on the slide: ' + pics.length);
+        const rels = parts[`ppt/slides/_rels/slide${idx}.xml.rels`];
+        const target = (/Type="[^"]*\/image" Target="\.\.\/media\/([^"]+)"/.exec(rels) || [])[1];
+        assert(target, 'image relationship: ' + rels);
+        assert(zip.file('ppt/media/' + target), 'media file present');
+        assert(warnings.length === 1 && warnings[0].includes('https://example.com/remote.png'), 'warning names the skipped image: ' + JSON.stringify(warnings));
+    });
+
+    h.test('a 30-line section continues on "(cont.)" slides, every line once', async () => {
+        const {slides} = await fixture();
+        const longSlides = slides.filter(s => paras(s).some(p => p === 'Long section' || p === 'Long section (cont.)'));
+        assert(longSlides.length >= 2, 'split over ' + longSlides.length + ' slides');
+        const lines = longSlides.flatMap(s => paras(s).filter(p => /^Long line \d+$/.test(p)));
+        assert(lines.length === 30 && new Set(lines).size === 30, 'all 30 lines once: ' + lines.length);
+        const budget = pptx.slideLineBudget ? pptx.slideLineBudget('landscape') : 0;
+        for (const s of longSlides) {
+            const n = paras(s).filter(p => /^Long line \d+$/.test(p)).length;
+            assert(n <= budget, `${n} lines on one slide, budget ${budget}`);
+        }
+        // The numbered list counts on across the break instead of restarting at 1.
+        const contFirst = all(longSlides[1], 'p').find(p => /^Long line \d+$/.test(texts(p).join('')));
+        const n = texts(contFirst).join('').replace('Long line ', '');
+        const autoNum = all(contFirst, 'buAutoNum')[0];
+        assert(autoNum && autoNum.getAttribute('startAt') === n, `continuation starts at ${n}: ${autoNum && autoNum.getAttribute('startAt')}`);
+    });
+
+    h.test('nested lists use indent levels; numbered lists are numbered', async () => {
+        const {slides} = await fixture();
+        const slide = slideTitled(slides, 'Nested');
+        const pOf = (text) => all(slide, 'p').find(p => texts(p).join('') === text);
+        const lvl = (text) => all(pOf(text), 'pPr')[0].getAttribute('lvl') || '0';
+        assert(lvl('Outer item') === '0' && lvl('Inner item') === '1', `levels ${lvl('Outer item')} / ${lvl('Inner item')}`);
+        assert(all(pOf('First numbered'), 'buAutoNum').length === 1, 'numbered item uses auto numbering');
+    });
+
+    h.test('front matter: on the cover and in the core properties, never on a slide', async () => {
+        const {slides, parse, prepared} = await fixture();
+        assert(prepared.doc.author === 'Sam Presenter', 'docMeta author');
+        const cover = paras(slides[0]);
+        assert(cover.includes('Prepared by Sam Presenter') && cover.includes('1 March 2026'), 'cover: ' + JSON.stringify(cover));
+        for (const s of slides) {
+            assert(!paras(s).some(p => /^(title|author|date):/.test(p)), 'no front matter lines on a slide');
+        }
+        const core = parse('docProps/core.xml');
+        const get = (local) => (Array.from(core.getElementsByTagName('*')).find(e => e.localName === local) || {}).textContent;
+        assert(get('title') === 'Deck Fixture', 'dc:title ' + get('title'));
+        assert(get('creator') === 'Sam Presenter', 'dc:creator ' + get('creator'));
+    });
+
+    // Oversized content: every shape that starts in the content area must end above its bottom edge.
+    const OVERFLOW_MD = [
+        '# Long paragraph', '', 'word '.repeat(1500), '',
+        '# Long bullet', '', '- ' + 'item '.repeat(1200), '- next item', '',
+        '# Long code', '', '```', ...Array.from({length: 120}, (_, i) => `line ${i} ` + 'x'.repeat(i % 7 === 0 ? 300 : 20)), '```', '',
+        '# Long row', '', '| a | b |', '|---|---|', `| ${'cell '.repeat(1500)} | short |`, '| r2 | v2 |', '',
+        '# Many rows', '', '| a | b |', '|---|---|', ...Array.from({length: 60}, (_, i) => `| row ${i} | value ${i} |`), '',
+    ].join('\n');
+
+    let overflowCached = null;
+    async function overflowDeck() {
+        if (overflowCached) return overflowCached;
+        const entry = getTemplates()[0];
+        const prepared = pipeline.prepareExport(OVERFLOW_MD, entry, {orientation: 'portrait'});
+        const warnings = [];
+        const blob = await pptx.pptxBlob(prepared.doc, entry, prepared.bodyHTML, {...prepared.pageOpts, onWarning: (w) => warnings.push(w)});
+        const buf = await blob.arrayBuffer();
+        const zip = await JSZip.loadAsync(buf);
+        const names = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+        const slides = await Promise.all(names.map(async n => new DOMParser().parseFromString(await zip.file(n).async('string'), 'application/xml')));
+        const bytes = new Uint8Array(buf);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        window.__officeFiles['overflow.pptx'] = btoa(bin);
+        window.__officeExpect['overflow.pptx'] = {slides: slides.length};
+        overflowCached = {slides, warnings};
+        return overflowCached;
+    }
+
+    h.test('oversized paragraphs, bullets, code and rows stay inside the content area', async () => {
+        const {slides, warnings} = await overflowDeck();
+        const EMU = 914400;
+        const frame = pptx.slideFrame ? pptx.slideFrame('portrait') : {y: 1.1, ch: 8.3};
+        const top = frame.y * EMU;
+        const bottom = (frame.y + frame.ch) * EMU;
+        let checked = 0;
+        slides.forEach((slide, i) => {
+            for (const xfrm of all(slide, 'xfrm').concat(Array.from(slide.getElementsByTagNameNS('http://schemas.openxmlformats.org/presentationml/2006/main', 'xfrm')))) {
+                const off = Array.from(xfrm.children).find(c => c.localName === 'off');
+                const ext = Array.from(xfrm.children).find(c => c.localName === 'ext');
+                if (!off || !ext) continue;
+                const y = Number(off.getAttribute('y'));
+                const cy = Number(ext.getAttribute('cy'));
+                if (y < top - 1000 || y >= bottom) continue; // title bar, title and footer
+                assert(y + cy <= bottom + 1000, `slide ${i + 1}: a box ends ${((y + cy - bottom) / EMU).toFixed(2)} in below the content area`);
+                checked++;
+            }
+        });
+        assert(checked >= slides.length - 1, 'checked ' + checked + ' boxes');
+        assert(slides.length > 12, 'the long content continues over many slides: ' + slides.length);
+        assert(warnings.some(w => /table row/.test(w)) && warnings.length === 1, 'one warning for the cut row: ' + JSON.stringify(warnings));
+    });
+
+    /** The slides of a deck built from Markdown. */
+    async function deckFrom(md) {
+        const entry = getTemplates()[0];
+        const prepared = pipeline.prepareExport(md, entry, {orientation: 'landscape'});
+        const blob = await pptx.pptxBlob(prepared.doc, entry, prepared.bodyHTML, {...prepared.pageOpts, onWarning: () => {}});
+        const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+        const names = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+        return Promise.all(names.map(async n => new DOMParser().parseFromString(await zip.file(n).async('string'), 'application/xml')));
+    }
+
+    h.test('list numbers and levels stay in PowerPoint\'s ranges; 0 and negative starts show as written', async () => {
+        const deep = Array.from({length: 11}, (_, i) => '  '.repeat(i) + '- L' + i).join('\n');
+        const slides = await deckFrom(['# Numbers', '', '<ol start="99999999999"><li>big</li></ol>', '',
+            '<ol start="-3"><li>neg</li><li>neg2</li></ol>', '', 'Text.', '', '0. zero', '1. one', '', '# Deep', '', deep, ''].join('\n'));
+        for (const slide of slides) {
+            for (const n of all(slide, 'buAutoNum')) {
+                const at = n.getAttribute('startAt');
+                assert(at === null || (Number(at) >= 1 && Number(at) <= 32767), 'startAt in 1..32767: ' + at);
+            }
+            for (const pPr of all(slide, 'pPr')) {
+                const lvl = pPr.getAttribute('lvl');
+                assert(lvl === null || Number(lvl) <= 8, 'lvl at most 8: ' + lvl);
+            }
+        }
+        const numbers = slides.slice(1).find(s => paras(s).includes('Numbers'));
+        const ps = paras(numbers);
+        for (const t of ['-3. neg', '-2. neg2', '0. zero', '1. one']) assert(ps.includes(t), `"${t}" shown: ` + JSON.stringify(ps));
+        const deepSlide = slides.find(s => paras(s).includes('Deep'));
+        assert(paras(deepSlide).includes('L10'), 'the deepest item is kept');
+    });
+
+    h.test('hyperlink targets are valid URIs under 2000 characters; dropped links keep their text', async () => {
+        const entry = getTemplates()[0];
+        const long = 'https://example.com/' + 'a'.repeat(5000);
+        const md = ['# Links', '',
+            '<p><a href="https://x.com/?a=1&amp;b=<2>&amp;c=&quot;">quoted</a> <a href="https://a.com/%ZZ">badescape</a> '
+            + `<a href="${long}">toolong</a> <a href="javascript:alert(1)">script</a> <a href="mailto:a@b.c">mail</a> `
+            + '<a href="https://ok.example/path">fine</a></p>', ''].join('\n');
+        const prepared = pipeline.prepareExport(md, entry, {orientation: 'landscape'});
+        const blob = await pptx.pptxBlob(prepared.doc, entry, prepared.bodyHTML, {...prepared.pageOpts, onWarning: () => {}});
+        const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+        const targets = [];
+        for (const name of Object.keys(zip.files).filter(n => /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/.test(n))) {
+            const xml = new DOMParser().parseFromString(await zip.file(name).async('string'), 'application/xml');
+            assert(!xml.getElementsByTagName('parsererror')[0], name + ' parses');
+            for (const rel of xml.getElementsByTagName('Relationship')) {
+                if (rel.getAttribute('TargetMode') === 'External') targets.push(rel.getAttribute('Target'));
+            }
+        }
+        for (const t of targets) {
+            assert(t.length <= 2000, 'under 2000 characters: ' + t.length);
+            assert(!/[\s<>"{}|\\^`]|%(?![0-9A-Fa-f]{2})/.test(t), 'a valid URI: ' + t.slice(0, 80));
+            assert(new URL(t).href === t, 'absolute and normalised: ' + t.slice(0, 80));
+        }
+        assert(targets.includes('https://x.com/?a=1&b=%3C2%3E&c=%22'), 'the quoted link is kept, percent-encoded: ' + targets.join(' '));
+        assert(targets.includes('mailto:a@b.c') && targets.includes('https://ok.example/path'), 'valid links kept');
+        assert(targets.length === 3, 'the invalid, over-long and script links are dropped: ' + targets.length);
+        const slide = new DOMParser().parseFromString(await zip.file('ppt/slides/slide2.xml').async('string'), 'application/xml');
+        const text = paras(slide).join(' ');
+        for (const word of ['quoted', 'badescape', 'toolong', 'script', 'mail', 'fine']) assert(text.includes(word), `"${word}" kept`);
+    });
+
+    h.test('slide footers count the continuation slides', async () => {
+        const {slides} = await fixture();
+        const total = slides.length - 1;
+        const last = paras(slides[slides.length - 1]);
+        assert(last.includes(`${total} / ${total}`), 'last footer: ' + JSON.stringify(last));
+    });
+
+    h.run();
+</script>
+</body>
+</html>

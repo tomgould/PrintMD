@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF Importer Code Block Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>PDF importer on code blocks inside serif prose: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+
+<script type="module">
+    // code-article.pdf (tests/fixtures/build-pdfs.mjs): serif prose around a shell
+    // command and an indented PHP block, a wrapped sentence with a link, a running footer.
+    import * as pdfImport from '../js/pdf-import.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTERS_PDF_CODE');
+
+    let imported = null;
+    const load = () => (imported ||= (async () => {
+        const blob = await (await fetch('fixtures/code-article.pdf')).blob();
+        return pdfImport.pdfToMarkdown(new File([blob], 'code-article.pdf', {type: 'application/pdf'}));
+    })());
+    /** The text inside every fenced block, one string per block. */
+    const fences = (md) => [...md.matchAll(/^```[^\n]*\n([\s\S]*?)\n```$/gm)].map(m => m[1]);
+    const show = (s) => JSON.stringify(s.length > 700 ? s.slice(0, 700) + '…' : s);
+
+    h.test('prose stays out of the fences: paragraph, bash fence, paragraph, php fence', async () => {
+        const md = await load();
+        const want = [
+            'Add the kit to a project with npm, next to a paper driver for the stock cards:',
+            '',
+            '```bash',
+            'npm install @example-co/widget-kit paper-driver',
+            '```',
+            '',
+            'Next, open a shelf, make a widget and give it a colour:',
+            '',
+            '```php',
+            'use ExampleCo\\Widgets\\Shelf\\ShelfOpener;',
+        ].join('\n');
+        assert(md.includes(want), 'sequence not found: ' + show(md.slice(md.indexOf('Add the kit'))));
+        assert(!fences(md).some(f => /Add the kit|Next, open|Each shop/.test(f)), 'prose inside a fence');
+    });
+
+    h.test('code keeps its indentation from the x offsets', async () => {
+        const php = fences(await load()).find(f => f.includes('ShelfOpener::open(')) || '';
+        for (const line of ['$shelf = ShelfOpener::open(', "    room: 'north-wing',", "    rack: 'rack-07',", ');',
+            "    ->paint(new Colour('green'))", "    ->label(new Label('Garden'));"]) {
+            assert(php.split('\n').includes(line), `lacks line ${JSON.stringify(line)}: ${show(php)}`);
+        }
+    });
+
+    h.test('a wrapped sentence with a link and a short last line stays one paragraph', async () => {
+        const md = await load();
+        const para = md.split('\n\n').find(p => p.startsWith('Each shop keeps')) || '';
+        assert(para.endsWith('lists every shelf option, colour rule and label size.') && !para.includes('\n'), 'paragraph ' + show(para));
+        assert(para.includes('The [HANDBOOK](<https://example.com/widget-kit/handbook>) lists'), 'link text ' + show(para));
+        assert(!fences(md).some(f => /label size/.test(f)), 'the last line became code');
+    });
+
+    h.test('the running footer with page numbers is dropped', async () => {
+        const md = await load();
+        assert(!/example\.com\/kits|\b[12] ?\/ ?2\b/.test(md), 'footer kept: ' + show(md));
+    });
+
+    h.test('guessLang: shell commands, and PHP from use, :: and $variables before JS', () => {
+        const cases = [
+            ['composer require example-co/widgets', 'bash'],
+            ['npm install --save example-widgets', 'bash'],
+            ['$ git clone https://example.com/widgets.git', 'bash'],
+            ['use ExampleCo\\Widgets\\Shelf;\n\n$driver = new PaperDriver();', 'php'],
+            ["$shelf = Shelf::open(\n    room: 'north'\n);", 'php'],
+            ['const lorem = require("lorem");\nlet x = 1;', 'js'],
+        ];
+        for (const [code, want] of cases) {
+            const got = pdfImport.guessLang(code);
+            assert(got === want, `${JSON.stringify(code.slice(0, 40))} -> ${JSON.stringify(got)}, want ${want}`);
+        }
+    });
+
+    h.run();
+</script>
+</body>
+</html>

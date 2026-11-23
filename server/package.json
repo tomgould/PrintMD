@@ -1,0 +1,22 @@
+{
+  "name": "printmd-pdf-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Markdown to branded PDF over HTTP, using the PrintMD export pipeline and headless Chromium.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "src/main.mjs",
+  "scripts": {
+    "start": "node src/main.mjs",
+    "start:local": "node src/main.mjs --local",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.64.1"
+  },
+  "optionalDependencies": {
+    "jose": "6.2.12"
+  }
+}

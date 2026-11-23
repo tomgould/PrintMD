@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDF Importer Huge Line Test</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; white-space: pre-wrap; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>PDF importer on one line of 200,000 text items: Tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+
+<script type="module">
+    // One very wide line of single letters, one text item each, given straight to
+    // the layout code (pagesToMarkdown) as pdf.js would hand them over. Spreading
+    // that many items into a call (push(...items)) overflows the stack; the
+    // importer must loop instead. A real PDF of that size takes too long to parse here.
+    import * as pdfImport from '../js/pdf-import.js';
+    import * as growth from './lib/growth.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('IMPORTERS_PDF_ITEMS');
+
+    /** One page holding one line of n items, with a lone bullet label in front so the label merge sees them all. */
+    function linePage(n) {
+        const item = (str, x, fontName) => ({str, fontName, x, y: 700, pageY: 92, pageHeight: 792, pageWidth: 14400, dir: 'ltr',
+            scaleX: 1, fontSize: 0.5, width: 0.05, pageNum: 1, mono: false, bold: false, italic: false, named: true});
+        const items = [item('•', 2, 'f1')];
+        for (let i = 0; i < n; i++) items.push(item(String.fromCharCode(97 + (i % 26)), 3 + i * 0.07, i % 2 ? 'f2' : 'f1'));
+        return [{num: 1, width: 14400, height: 792, items, links: [], images: [], marks: []}];
+    }
+
+    h.test('200,000 text items on one line convert without overflowing the stack', () => {
+        assert(typeof pdfImport.pagesToMarkdown === 'function', 'pagesToMarkdown is not exported');
+        const out = pdfImport.pagesToMarkdown(linePage(200000));
+        assert(out.length >= 100000, 'too little text: ' + out.length);
+    });
+
+    h.test('a long line grows linearly with its items', async () => {
+        const problem = await growth.checkLinear((pages) => pdfImport.pagesToMarkdown(pages), linePage, {n: 50000, runs: 1, capMs: 10000});
+        assert(!problem, problem);
+    });
+
+    h.run();
+</script>
+</body>
+</html>

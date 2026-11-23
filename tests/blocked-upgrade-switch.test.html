@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Waiting note switch Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>The waiting note follows what the other tabs are doing</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    // The app (in this page, wait cut to 300 ms) waits in line behind tab B's
+    // upgrade, which an old tab blocks. A stand-in for "another tab running an
+    // upgrade" answers on the store's channel only while the test says so.
+    import {createHarness, assert} from './lib/harness.js';
+    import {bootHereBehindOldTab, shown, waitFor, waitNote} from './lib/old-tab.js';
+    import {UPGRADE_CHANNEL} from '../js/store.js';
+
+    const h = createHarness('BLOCKEDSWITCH');
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    let answering = false;
+    const peer = new BroadcastChannel(UPGRADE_CHANNEL);
+    peer.onmessage = (e) => { if (answering && e.data && e.data.type === 'ask') peer.postMessage({type: 'upgrading'}); };
+
+    let old, win, doc, booted;
+    const noteText = () => (shown(waitNote(doc)) ? waitNote(doc).textContent : '');
+    const banner = () => doc.getElementById('storage-banner');
+
+    h.test('an old-tab wait that finds an upgrade running when it runs out switches to "updating" instead of giving up', async () => {
+        ({old, win, doc, booted} = await bootHereBehindOldTab(300, {behindTabB: true}));
+        await waitFor(() => /close/.test(noteText()) && /\d s/.test(waitNote(doc).querySelector('.upgrade-wait-count').textContent), 'the old-tab note with its countdown', 3000);
+        answering = true;   // an upgrade starts in another tab before the 300 ms run out
+        await waitFor(() => /updating your documents/.test(noteText()), 'the note switches to updating', 3000);
+        await sleep(600);
+        assert(!win.__bd || !win.__bd.usingMemoryStore, 'did not fall back to memory');
+        assert(banner().hidden, 'no banner');
+        assert(waitNote(doc).querySelector('.upgrade-wait-count').textContent === '', 'no countdown while another tab upgrades');
+    });
+
+    h.test('when the upgrading tab stops answering, the wait falls back to the old-tab countdown and then the banner', async () => {
+        answering = false;
+        try {
+            await waitFor(() => win.__bd && win.__bd.usingMemoryStore, 'the memory fallback after the peer went quiet', 6000);
+            await booted;
+            assert(!banner().hidden && /another PrintMD tab/i.test(banner().textContent), 'banner: ' + banner().textContent);
+            assert(!shown(waitNote(doc)), 'note hidden');
+        } finally {
+            old.close();
+            peer.close();
+        }
+    });
+
+    h.run();
+</script>
+</body>
+</html>

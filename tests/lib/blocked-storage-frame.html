@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- The app's own policy (index.html), word for word: tests/ui-prefs.test.html checks they match. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client https://apis.google.com; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; font-src 'self'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https://www.googleapis.com https://content.googleapis.com https://docs.google.com https://*.googleusercontent.com https://oauth2.googleapis.com https://accounts.google.com/gsi/; frame-src https://youtube.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://docs.google.com https://accounts.google.com https://content.googleapis.com; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>Blocked storage frame</title>
+</head>
+<body>
+<!--
+  Loaded in a frame by tests/ui-prefs.test.html: the whole editor, under the app's
+  Content-Security-Policy, with localStorage throwing. blocked-storage-frame.js does the work.
+-->
+<script src="blocked-storage-frame.js" type="module"></script>
+</body>
+</html>

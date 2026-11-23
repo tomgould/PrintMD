@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- Resolve ./vendor/... and ./js/... from the repository root, as index.html does. -->
+<base href="/">
+<title>Editor-style print</title>
+<!--
+  The editor's own PDF export, minus the print dialog: window.__editorPrint()
+  runs prepareExport() and exportPDF() from js/ with this window as the print
+  window, window.print() replaced by a flag and window.close() by a no-op (the
+  afterprint handler would close the tab mid-print). The test then prints the page
+  with CDP Page.printToPDF, the same call Chrome's Save as PDF makes.
+-->
+<script src="./vendor/marked/marked.min.js"></script>
+<script src="./vendor/dompurify/purify.min.js"></script>
+<script src="./vendor/highlightjs/highlight.min.js"></script>
+<script src="./vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+import {prepareExport} from './js/export-pipeline.js';
+import {configureMarked} from './js/markdown.js';
+import {getTemplateById} from './js/templates.js';
+import {exportPDF} from './js/pdf-export.js';
+
+configureMarked();
+window.__printed = false;
+window.__editorPrint = async (markdown, templateId, opts) => {
+    const entry = getTemplateById(templateId);
+    const prepared = prepareExport(markdown, entry, opts);
+    window.print = () => { window.__printed = true; };
+    // exportPDF closes the print window after printing; this window must stay for CDP.
+    window.close = () => {};
+    await exportPDF(prepared, entry, {openWindow: () => window});
+    return prepared.doc.title;
+};
+window.__ready = true;
+</script>
+</head>
+<body></body>
+</html>

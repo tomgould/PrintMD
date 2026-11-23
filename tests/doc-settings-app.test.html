@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Per-document settings in the app Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        #app { width: 1400px; height: 900px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>Per-document settings in the app: each document keeps its template, size, orientation and format</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<iframe id="app" title="app under test"></iframe>
+<script type="module">
+    import * as store from '../js/store.js';
+    import {getTemplates} from '../js/templates.js';
+    import {templatePageDefaults, templatePageSizes} from '../js/export-options.js';
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+
+    const h = createHarness('DOCSETTINGSAPP');
+
+    // Templates chosen by what they offer, never by name, so the page runs in any edition (the
+    // public one has only core templates). FIRST and SECOND: no default page, A3 and Letter offered,
+    // no Slide. DECK: a default page of Slide that also offers Letter; without one (an edition with
+    // no such template) document C uses FIRST with Legal and the default-page checks are skipped.
+    const all = getTemplates();
+    const sizes = (t) => templatePageSizes(t.manifest);
+    const plain = (t) => Object.keys(templatePageDefaults(t.manifest)).length === 0 && !sizes(t).includes('Slide');
+    const FIRST = all.find((t) => plain(t) && sizes(t).includes('A3') && sizes(t).includes('Letter'));
+    const SECOND = all.find((t) => t !== FIRST && plain(t) && sizes(t).includes('Letter')) || FIRST;
+    const DECK = all.find((t) => templatePageDefaults(t.manifest).pageSize === 'Slide' && sizes(t).includes('Letter'));
+    const idOf = (t) => t.manifest.id;
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const frame = document.getElementById('app');
+    const LAST_USED = 'printmd-export-opts';
+    let win, doc;
+    const ids = {};
+
+    async function waitFor(fn, what, ms = 8000) {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+            try { if (fn()) return; } catch (_e) { /* not ready */ }
+            await sleep(30);
+        }
+        throw new Error('timed out waiting for ' + what);
+    }
+
+    async function boot(reload = false) {
+        const loaded = new Promise(res => frame.addEventListener('load', res, {once: true}));
+        if (reload) frame.contentWindow.location.reload(); else frame.src = '../index.html';
+        await loaded;
+        win = frame.contentWindow;
+        doc = frame.contentDocument;
+        await waitFor(() => win.__bd && win.__bd.docManager.currentId != null && !$('editor').readOnly, 'app boot');
+    }
+
+    const $ = (id) => doc.getElementById(id);
+    const mgr = () => win.__bd.docManager;
+    function pick(id, value) {
+        $(id).value = value;
+        $(id).dispatchEvent(new win.Event('change', {bubbles: true}));
+    }
+    function setText(text) {
+        $('editor').value = text;
+        $('editor').dispatchEvent(new win.Event('input', {bubbles: true}));
+    }
+    /** Every queued write has committed (saves run one at a time, in order). */
+    const settle = () => mgr().saveCurrent();
+    async function newDocument(text) {
+        const before = mgr().currentId;
+        $('btn-new').click();
+        await waitFor(() => mgr().currentId !== before && $('editor').value === '', 'a new document');
+        setText(text);
+        await waitFor(() => doc.querySelector('#preview .preview-page'), 'the preview of the new document');   // typing renders after 100 ms
+        await settle();
+        return mgr().currentId;
+    }
+    async function open(id) {
+        await win.__bd.openDocument(id);
+        assert(mgr().currentId === id, 'did not open ' + id);
+    }
+
+    // What the user sees: the four controls, the Slide lock and the preview page.
+    function screen() {
+        const pane = $('preview-pane');
+        const card = doc.querySelector('#preview .preview-page:not(.preview-page-cover) > div');
+        return {
+            template: $('template-select').value,
+            pageSize: $('export-paper-size').value,
+            orientation: $('export-orientation').value,
+            locked: $('export-orientation').disabled,
+            format: $('export-format').value,
+            aspect: pane.style.getPropertyValue('--preview-page-aspect'),
+            landscape: pane.classList.contains('landscape'),
+            previewTemplate: card ? card.className : '',
+        };
+    }
+    const ASPECT = {'A3 landscape': '0.7071', 'Letter portrait': '1.2941', 'Slide landscape': '0.5626', 'A4 portrait': '1.4143',
+        'Letter landscape': '0.7727', 'Legal portrait': '1.6471'};
+    function expectScreen(label, want) {
+        const got = screen();
+        const aspect = ASPECT[`${want.pageSize} ${want.orientation}`];
+        const full = {...want, locked: want.pageSize === 'Slide', aspect, landscape: want.orientation === 'landscape'};
+        if (want.template) full.previewTemplate = 'template-' + want.template;
+        const wrong = Object.keys(full).filter((k) => full[k] !== undefined && got[k] !== full[k]);
+        assert(wrong.length === 0, `${label}: ${wrong.map((k) => `${k} ${JSON.stringify(got[k])}, want ${JSON.stringify(full[k])}`).join('; ')}`);
+    }
+
+    const A = {template: idOf(FIRST), pageSize: 'A3', orientation: 'landscape', format: 'docx'};
+    const B = {template: idOf(SECOND), pageSize: 'Letter', orientation: 'portrait', format: 'pdf'};
+    const C = DECK ? {template: idOf(DECK), pageSize: 'Slide', orientation: 'landscape', format: 'pptx'}
+        : {template: idOf(FIRST), pageSize: 'Legal', orientation: 'portrait', format: 'pptx'};
+
+    /** Open document A and put its settings back, so a failure in one case does not spill into the next. */
+    async function resetA() {
+        assert(ids.A, 'document A exists (the first case made it)');
+        await open(ids.A);
+        pick('template-select', A.template);
+        pick('export-paper-size', A.pageSize);
+        pick('export-orientation', A.orientation);
+        pick('export-format', A.format);
+        await settle();
+        expectScreen('A reset', A);
+    }
+
+    h.test('three documents set different settings; each keeps its own as the user switches', async () => {
+        assert(FIRST, 'no template offers A3 and Letter without a default page');
+        await resetStorage(store);
+        try { localStorage.removeItem(LAST_USED); } catch (_e) { /* unavailable */ }
+        await boot();
+        setText('# Doc A\n\ntext');
+        pick('template-select', A.template);
+        pick('export-paper-size', 'A3');
+        pick('export-orientation', 'landscape');
+        pick('export-format', 'docx');
+        await settle();
+        ids.A = mgr().currentId;
+        expectScreen('A as set', A);
+
+        ids.B = await newDocument('# Doc B\n\ntext');
+        expectScreen('B starts from A\'s choices', A);
+        pick('template-select', B.template);
+        pick('export-paper-size', 'Letter');
+        pick('export-orientation', 'portrait');
+        pick('export-format', 'pdf');
+        await settle();
+        expectScreen('B as set', B);
+
+        ids.C = await newDocument('# Doc C\n\ntext');
+        pick('template-select', C.template);    // picking the deck sets its default page: Slide, landscape
+        if (!DECK) {
+            pick('export-paper-size', 'Legal');
+            pick('export-orientation', 'portrait');
+        }
+        pick('export-format', 'pptx');
+        await settle();
+        expectScreen('C as set', C);
+
+        await open(ids.A);
+        expectScreen('back on A', A);
+        await open(ids.B);
+        expectScreen('back on B', B);
+        await open(ids.C);
+        expectScreen('back on C', C);
+        await open(ids.A);
+        expectScreen('A after C', A);
+    });
+
+    h.test('after a page reload each document shows its own settings and preview', async () => {
+        await settle();
+        await boot(true);
+        const want = {[ids.A]: A, [ids.B]: B, [ids.C]: C};
+        assert(want[mgr().currentId], 'one of the three opens');
+        expectScreen('the document open after the reload', want[mgr().currentId]);
+        for (const key of ['B', 'C', 'A', 'C', 'B']) {
+            await open(ids[key]);
+            expectScreen(`${key} after the reload`, want[ids[key]]);
+        }
+        const last = JSON.parse(localStorage.getItem(LAST_USED));
+        assert(last.format === 'pptx' && last.pageSize === C.pageSize, 'the last used is the last change (C): ' + JSON.stringify(last));
+    });
+
+    h.test('opening a document never applies its template\'s default page; picking the template does', async () => {
+        if (!DECK) return;   // no template with a default page in this edition
+        await resetA();
+        const deck = idOf(DECK);
+        // D: the deck template with Letter portrait stored. E: the deck template and no settings stored.
+        const d = await store.upsertDoc({title: 'Doc D', snapshot: '# Doc D\n\ntext', templateId: deck, origin: 'local',
+            updatedAt: 1, exportOpts: {format: 'pdf', pageSize: 'Letter', orientation: 'portrait'}});
+        const e = await store.upsertDoc({title: 'Doc E', snapshot: '# Doc E\n\ntext', templateId: deck, origin: 'local', updatedAt: 2});
+        await open(d.id);
+        expectScreen('D', {template: deck, pageSize: 'Letter', orientation: 'portrait', format: 'pdf'});
+        localStorage.setItem(LAST_USED, JSON.stringify({format: 'docx', pageSize: 'Letter', orientation: 'landscape'}));
+        await open(ids.A);
+        await open(e.id);
+        expectScreen('E uses the last used, not Slide', {template: deck, pageSize: 'Letter', orientation: 'landscape', format: 'docx'});
+        await settle();
+        assert(!('exportOpts' in await store.getDoc(e.id)), 'opening E did not give it settings');
+        assert(JSON.parse(localStorage.getItem(LAST_USED)).pageSize === 'Letter', 'opening Deck documents did not write Slide as last used');
+        pick('export-orientation', 'portrait');
+        await settle();
+        const stored = (await store.getDoc(e.id)).exportOpts;
+        assert(JSON.stringify(stored) === JSON.stringify({format: 'docx', pageSize: 'Letter', orientation: 'portrait'}), 'E copy: ' + JSON.stringify(stored));
+        // Picking a template with a default page in the picker still applies it.
+        await open(ids.B);
+        pick('template-select', deck);
+        expectScreen('B after picking the deck', {template: deck, pageSize: 'Slide', orientation: 'landscape', format: 'pdf'});
+        pick('template-select', B.template);
+        pick('export-paper-size', 'Letter');
+        pick('export-orientation', 'portrait');
+        await settle();
+        expectScreen('B put back', B);
+    });
+
+    h.test('changing settings does not move a document in the recent list', async () => {
+        await resetA();
+        await settle();
+        const before = await store.getDoc(ids.A);
+        const order = (await store.listRecent(10)).map((r) => r.id).join(',');
+        pick('export-paper-size', 'Letter');
+        pick('export-format', 'pdf');
+        await settle();
+        const after = await store.getDoc(ids.A);
+        assert(after.updatedAt === before.updatedAt, `updatedAt moved: ${before.updatedAt} -> ${after.updatedAt}`);
+        assert((await store.listRecent(10)).map((r) => r.id).join(',') === order, 'the recent order changed');
+        assert(after.exportOpts.pageSize === 'Letter' && after.exportOpts.format === 'pdf', 'saved: ' + JSON.stringify(after.exportOpts));
+        pick('export-paper-size', 'A3');
+        pick('export-format', 'docx');
+        await settle();
+        expectScreen('A put back', A);
+    });
+
+    h.test('a missing template or a size the template does not offer falls back as it always has', async () => {
+        await resetA();   // the template on screen is A's when F opens
+        // G: a template without Slide, and Slide stored: A4, the orientation as chosen, not locked.
+        const g = await store.upsertDoc({title: 'Doc G', snapshot: '# Doc G\n\ntext', templateId: A.template, origin: 'local',
+            updatedAt: 3, exportOpts: {format: 'pptx', pageSize: 'Slide', orientation: 'portrait'}});
+        await open(g.id);
+        expectScreen('G', {template: A.template, pageSize: 'A4', orientation: 'portrait', format: 'pptx'});
+        // F: a template that no longer exists: the template on screen stays, its settings still apply.
+        const f = await store.upsertDoc({title: 'Doc F', snapshot: '# Doc F\n\ntext', templateId: 'no-such-template', origin: 'local',
+            updatedAt: 4, exportOpts: {format: 'docx', pageSize: 'A3', orientation: 'landscape'}});
+        await open(f.id);
+        const s = screen();
+        assert(s.previewTemplate === 'template-' + A.template, 'the template on screen stays: ' + s.previewTemplate);
+        assert(s.pageSize === 'A3' && s.orientation === 'landscape' && s.format === 'docx', 'F settings: ' + JSON.stringify(s));
+    });
+
+    h.test('a new document starts from the choices on screen', async () => {
+        await resetA();
+        const id = await newDocument('# Doc H\n\ntext');
+        expectScreen('H', A);
+        const rec = await store.getDoc(id);
+        assert(JSON.stringify(rec.exportOpts) === JSON.stringify({format: 'docx', pageSize: 'A3', orientation: 'landscape'}),
+            'H stored its copy: ' + JSON.stringify(rec.exportOpts));
+    });
+
+    h.test('a failed settings write says "Not saved", keeps the last used, and a good one clears it; unsaved text stays reported', async () => {
+        await resetA();
+        const status = () => $('autosave-status').textContent;
+        const put = win.IDBObjectStore.prototype.put;
+        const failWhen = (test) => {
+            win.IDBObjectStore.prototype.put = function (value, ...rest) {
+                if (test(value)) throw new win.DOMException('The quota has been exceeded (test)', 'QuotaExceededError');
+                return put.call(this, value, ...rest);
+            };
+        };
+        try {
+            const lastBefore = localStorage.getItem(LAST_USED);
+            const recBefore = await store.getDoc(ids.A);
+            failWhen(() => true);
+            pick('export-paper-size', 'Letter');
+            await waitFor(() => status() === 'Not saved', 'the footer says Not saved');
+            assert(localStorage.getItem(LAST_USED) === lastBefore, 'the last used is not written for a failed write: ' + localStorage.getItem(LAST_USED));
+            assert(JSON.stringify((await store.getDoc(ids.A)).exportOpts) === JSON.stringify(recBefore.exportOpts), 'the record is unchanged');
+            assert($('export-paper-size').value === 'Letter', 'the choice stays on screen');
+            win.IDBObjectStore.prototype.put = put;
+            pick('export-paper-size', 'A3');
+            await settle();
+            await waitFor(() => status() !== 'Not saved', 'a good settings write clears Not saved');
+            assert(JSON.parse(localStorage.getItem(LAST_USED)).pageSize === 'A3', 'the last used follows the good write');
+            assert((await store.getDoc(ids.A)).exportOpts.pageSize === 'A3', 'stored');
+            // Text that fails to save stays reported when a settings write then succeeds.
+            failWhen((v) => v && typeof v.snapshot === 'string' && v.snapshot.includes('FAILTEXT'));
+            setText('# Doc A\n\nFAILTEXT');
+            await settle().catch(() => {});
+            await waitFor(() => status() === 'Not saved', 'the failed text save says Not saved');
+            pick('export-format', 'pdf');
+            await sleep(100);
+            await settle().catch(() => {});
+            assert((await store.getDoc(ids.A)).exportOpts.format === 'pdf', 'the settings write went through');
+            assert(status() === 'Not saved', 'still Not saved: the text is not stored, got ' + status());
+            win.IDBObjectStore.prototype.put = put;
+            await settle();
+            await waitFor(() => status() !== 'Not saved', 'the good text save clears it');
+        } finally {
+            win.IDBObjectStore.prototype.put = put;
+            setText('# Doc A\n\ntext');
+            await settle().catch(() => {});
+        }
+    });
+
+    h.run();
+</script>
+</body>
+</html>

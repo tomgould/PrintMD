@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Upgrade in another tab Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        #upgrader { width: 400px; height: 60px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>A tab waiting on another tab's long upgrade says so, and never gives up while it runs</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<iframe id="upgrader" title="another tab running a long upgrade"></iframe>
+<script type="module">
+    // Two tabs on the current code open a version 1 library together: the first
+    // runs the upgrade (tests/lib/upgrader.html, held open by the test), the
+    // second (the app in this page) waits in line behind it. The second must not
+    // claim an "older version" tab and must not fall back to memory, even long
+    // past its give-up time (cut to 300 ms here).
+    import {createHarness, assert} from './lib/harness.js';
+    import {bootHere, shown, v1Database, waitFor, waitNote} from './lib/old-tab.js';
+
+    const h = createHarness('BLOCKEDPEER');
+    const WAIT_MS = 300;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    h.test('behind another tab\'s running upgrade: an "updating" note, no countdown, no banner, then the documents', async () => {
+        await v1Database();
+        const frame = document.getElementById('upgrader');
+        frame.src = 'lib/upgrader.html';
+        await waitFor(() => frame.contentWindow && frame.contentWindow.upgradeStarted, 'the other tab\'s upgrade to start');
+        const {win, doc, booted} = await bootHere(WAIT_MS);
+        try {
+            await waitFor(() => shown(waitNote(doc)), 'the wait note', 3000);
+            const text = waitNote(doc).textContent;
+            assert(/updating your documents/.test(text), 'says another tab is updating: ' + text);
+            assert(!/older version/.test(text), 'does not blame an older version: ' + text);
+            assert(waitNote(doc).querySelector('.upgrade-wait-count').textContent === '', 'no countdown');
+            await waitFor(() => /updating your documents/.test(doc.querySelector('body > .sr-status').textContent), 'announced');
+            // Well past the 300 ms give-up time, with the other tab still upgrading.
+            await sleep(WAIT_MS * 6);
+            assert(!win.__bd || !win.__bd.usingMemoryStore, 'did not fall back to memory');
+            assert(doc.getElementById('storage-banner').hidden, 'no storage banner');
+            assert(doc.getElementById('editor').readOnly, 'still waiting, read-only');
+        } finally {
+            frame.contentWindow.releaseUpgrade();
+        }
+        await waitFor(() => frame.contentWindow.upgradeDone, 'the other tab\'s upgrade to finish');
+        await booted;
+        assert(!win.__bd.usingMemoryStore, 'on IndexedDB');
+        assert(win.__bd.docManager.currentId === 'old-1', 'the stored doc loaded: ' + win.__bd.docManager.currentId);
+        assert(!shown(waitNote(doc)), 'note hidden');
+        assert(!doc.getElementById('editor').readOnly, 'editable');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

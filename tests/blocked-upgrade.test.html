@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Blocked upgrade Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        #app { width: 1400px; height: 900px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>A new tab whose database upgrade is blocked by an old tab says so, and recovers</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<iframe id="app" title="app under test"></iframe>
+<script type="module">
+    // The timeout case (the old tab never closes) is blocked-upgrade-timeout.test.html.
+    import {createHarness, assert} from './lib/harness.js';
+    import {bootBehindOldTab, shown, waitFor, waitNote} from './lib/old-tab.js';
+
+    const h = createHarness('BLOCKED');
+    let old, win, doc;
+    const note = () => waitNote(doc);
+    const editor = () => doc.getElementById('editor');
+    const srStatus = () => doc.querySelector('body > .sr-status').textContent;
+
+    h.test('while the old tab blocks the upgrade, a visible note says so, with the seconds left', async () => {
+        ({old, win, doc} = await bootBehindOldTab(document.getElementById('app')));
+        await waitFor(() => shown(note()), 'the wait note');
+        assert(/^Waiting for another PrintMD tab to close/.test(note().textContent.trim()), 'note text: ' + note().textContent);
+        const count = note().querySelector('.upgrade-wait-count');
+        assert(/\b[1-5] s\b/.test(count.textContent), 'countdown: ' + count.textContent);
+        assert(count.getAttribute('aria-hidden') === 'true', 'the ticking seconds are not read out');
+        await waitFor(() => /Waiting for another PrintMD tab to close/.test(srStatus()), 'announced once, politely');
+        assert(editor().readOnly, 'the editor stays read-only while waiting');
+    });
+
+    h.test('when the old tab closes, the note goes and the stored document loads', async () => {
+        old.close();
+        await waitFor(() => win.__bd.docManager.currentId === 'old-1' && !editor().readOnly, 'the stored doc loads, editable');
+        assert(!shown(note()), 'note hidden');
+        assert(editor().value.startsWith('# Example Co old doc'), 'editor shows the stored doc');
+        assert(!win.__bd.usingMemoryStore, 'on IndexedDB, not the memory fallback');
+        assert(doc.getElementById('storage-banner').hidden, 'no storage banner');
+        await waitFor(() => srStatus() === 'Documents loaded', 'recovery announced');
+    });
+
+    // Tab C: opened while tab B's upgrade waits behind the old tab. Its open queues
+    // behind B's and never gets a "blocked" event, so the app starts the note itself.
+    h.test('a tab opened behind another tab\'s waiting upgrade shows the note too, then recovers', async () => {
+        const frame = document.getElementById('app');
+        frame.src = 'about:blank';
+        await new Promise(res => frame.addEventListener('load', res, {once: true}));
+        let tabB;
+        ({old, win, doc, tabB} = await bootBehindOldTab(frame, {behindTabB: true}));
+        await waitFor(() => shown(note()), 'the wait note in tab C', 3000);
+        assert(/\b[1-5] s\b/.test(note().querySelector('.upgrade-wait-count').textContent), 'countdown running');
+        assert(editor().readOnly, 'read-only while waiting');
+        old.close();
+        await tabB;
+        await waitFor(() => win.__bd.docManager.currentId === 'old-1' && !editor().readOnly, 'tab C loads the stored doc');
+        assert(!shown(note()), 'note hidden');
+        assert(!win.__bd.usingMemoryStore, 'on IndexedDB');
+        assert(doc.getElementById('storage-banner').hidden, 'no storage banner');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

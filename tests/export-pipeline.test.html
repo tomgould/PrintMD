@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Export Pipeline Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+<h1>export-pipeline.js and print-document.js</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as pipeline from '../js/export-pipeline.js';
+    import * as printDoc from '../js/print-document.js';
+    import * as md from '../js/markdown.js';
+    import * as fonts from '../js/fonts.js';
+    import {getTemplateById, getTemplates} from '../js/templates.js';
+    import {templatePageDefaults} from '../js/export-options.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    // Snapshot: the print document for markdown-showcase.md with the core template,
+    // date and page options, compared with tests/fixtures/showcase-print.html.
+    // After an intended change, refresh it with `node tests/update-snapshots.mjs`
+    // and review the diff. The page origin (random test port) is written as
+    // http://ORIGIN so the fixture does not depend on it.
+    const SNAPSHOTS = {};
+    window.__snapshots = SNAPSHOTS;
+
+    const h = createHarness('PIPELINE');
+    md.configureMarked();
+    const DATE = new Date(2026, 0, 15);
+    const entry = (id) => getTemplateById(id);
+    // Every template, from the registry; the snapshot uses the core template, so it is the same in every edition.
+    const ALL = getTemplates();
+    const DEFAULT = ALL[0];
+    const CORE_SNAPSHOT_TEMPLATE = 'unbranded';
+    // The text people read, not the markup: a template may style one word of the title in its own tag.
+    const textOf = (html) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+
+    h.test('prepareExport returns doc, warnings, body, cover and page options (every template)', () => {
+        for (const t of ALL) {
+            const id = t.manifest.id;
+            const r = pipeline.prepareExport('# Plan\n\nHello **world**', t, {date: DATE});
+            assert(r.doc.title === 'Plan' && r.doc.date === '15 January 2026', `${id} doc: ` + JSON.stringify(r.doc));
+            assert(Array.isArray(r.warnings) && r.warnings.length === 0, `${id} no warnings: ` + r.warnings);
+            assert(r.bodyHTML.includes('<strong>world</strong>'), `${id} body rendered: ` + r.bodyHTML);
+            assert(/class="cover-page[ "]/.test(r.coverHTML) && textOf(r.coverHTML).includes('Plan'), `${id} cover rendered`);
+            // A4 portrait unless the template names its own default page (manifest.page.defaultSize, defaultOrientation).
+            const def = {pageSize: 'A4', orientation: 'portrait', ...templatePageDefaults(t.manifest)};
+            assert(r.pageOpts.pageSize === def.pageSize && r.pageOpts.orientation === def.orientation && r.pageOpts.margin === t.manifest.page.margin,
+                `${id} default page options: ` + JSON.stringify(r.pageOpts));
+        }
+    });
+
+    h.test('prepareExport strips front matter and puts its title, author and date on the cover (every template)', () => {
+        const src = '---\ntitle: Meta Title\nauthor: Jo Bloggs\ndate: 2026-03-01\n---\n# Heading\n\nbody';
+        for (const t of ALL) {
+            const id = t.manifest.id;
+            const r = pipeline.prepareExport(src, t, {date: DATE});
+            assert(r.doc.title === 'Meta Title' && r.doc.author === 'Jo Bloggs' && r.doc.date === '1 March 2026', `${id}: ` + JSON.stringify(r.doc));
+            assert(!/Meta Title|author:|<hr/.test(r.bodyHTML), `${id} front matter not in the body: ` + r.bodyHTML);
+            assert(r.bodyHTML.includes('<h1 id="heading">Heading</h1>'), `${id} body rendered: ` + r.bodyHTML);
+            const cover = textOf(r.coverHTML);
+            assert(cover.includes('Meta Title') && cover.includes('Jo Bloggs') && cover.includes('1 March 2026'),
+                `${id} cover uses the front matter: ` + r.coverHTML);
+        }
+    });
+
+    h.test('prepareExport: opts.meta wins over front matter', () => {
+        const src = '---\ntitle: Meta Title\nauthor: Jo\n---\nbody';
+        const r = pipeline.prepareExport(src, DEFAULT, {date: DATE, meta: {title: 'Option Title', author: '', date: 'Q3 2026'}});
+        assert(r.doc.title === 'Option Title' && r.doc.author === 'Jo' && r.doc.date === 'Q3 2026', JSON.stringify(r.doc));
+    });
+
+    h.test('prepareExport runs the template preflight checks (every template)', () => {
+        for (const t of ALL) {
+            const r = pipeline.prepareExport('no heading here', t);
+            assert(r.warnings.length === 1 && /title/i.test(r.warnings[0]), `${t.manifest.id} title warning: ` + r.warnings);
+        }
+    });
+
+    h.test('prepareExport validates page options and falls back to the template margin', () => {
+        const r = pipeline.prepareExport('# T', entry('unbranded'), {pageSize: 'A4; } body{display:none', orientation: 'landscape'});
+        assert(r.pageOpts.pageSize === 'A4' && r.pageOpts.orientation === 'landscape', JSON.stringify(r.pageOpts));
+        assert(r.pageOpts.margin === '22mm', 'unbranded margin: ' + r.pageOpts.margin);
+        assert(pipeline.prepareExport('# T', entry('unbranded'), {margin: '15mm'}).pageOpts.margin === '15mm', 'explicit margin kept');
+    });
+
+    h.test('prepareExport re-sanitises transformHTML output', () => {
+        const hostile = {manifest: {id: 'x', page: {}}, template: {transformHTML: (html) => html + '<img src=x onerror="alert(1)"><style>*{}</style>'}};
+        const r = pipeline.prepareExport('# T', hostile);
+        assert(!/onerror|<style/i.test(r.bodyHTML), 'hostile parts removed: ' + r.bodyHTML);
+    });
+
+    h.test('prepareExport: the cover gets the subject (front matter, or meta.subject); covers that ignore it are unchanged', () => {
+        let seen = null;
+        const probe = {manifest: {id: 'x', page: {}}, template: {renderCover: (doc) => { seen = doc; return '<div class="cover-page"></div>'; }}};
+        const src = '---\ntitle: T\nsubject: From the front matter\n---\nbody';
+        assert(pipeline.prepareExport(src, probe, {date: DATE}).doc.subject === 'From the front matter', 'doc.subject');
+        assert(seen && seen.subject === 'From the front matter' && seen.title === 'T', 'renderCover receives it: ' + JSON.stringify(seen));
+        pipeline.prepareExport(src, probe, {date: DATE, meta: {subject: 'From the option'}});
+        assert(seen.subject === 'From the option', 'meta.subject wins');
+        assert(pipeline.prepareExport('# T', probe).doc.subject === '', 'no subject: an empty string');
+        for (const t of ALL) {
+            const plain = pipeline.prepareExport('---\ntitle: Same\n---\nbody', t, {date: DATE});
+            const withSubject = pipeline.prepareExport('---\ntitle: Same\nsubject: Extra\n---\nbody', t, {date: DATE});
+            const ignores = !t.template.renderCover.toString().includes('subject');
+            if (ignores) assert(plain.coverHTML === withSubject.coverHTML, `${t.manifest.id}: a cover that ignores the subject is unchanged`);
+        }
+    });
+
+    h.test('prepareExport: print carries the page background and the running head and foot only when the template has them', () => {
+        for (const t of ALL) {
+            const r = pipeline.prepareExport('# T', t, {date: DATE});
+            if (!t.template.pageBackground) assert(!('pageBackground' in r.print), `${t.manifest.id}: no pageBackground key`);
+            if (!t.template.runningHead && !t.template.runningFoot && !t.template.runningLogo) {
+                assert(!('running' in r.print) && !('date' in r.print), `${t.manifest.id}: no running or date key`);
+            }
+        }
+        const tpl = {manifest: {id: 'x', page: {margin: '20mm'}},
+            template: {pageBackground: '#1D1815', runningFoot: {right: 'Page {page} of {pages}'}, runningHead: {left: '{title}'}}};
+        const r = pipeline.prepareExport('---\ntitle: T\n---\nbody', tpl, {date: DATE});
+        assert(r.print.pageBackground === '#1d1815', 'background: ' + r.print.pageBackground);
+        assert(r.print.running && r.print.running.foot.right === 'Page {page} of {pages}' && r.print.date === '15 January 2026', JSON.stringify(r.print));
+        const bad = pipeline.prepareExport('# T', {manifest: {id: 'x', page: {}}, template: {pageBackground: 'red; } x {'}});
+        assert(!('pageBackground' in bad.print), 'a bad colour is dropped');
+        const html = printDoc.buildPrintDocument({title: r.doc.title, templateId: 'x', bodyHTML: r.bodyHTML, pageOpts: r.pageOpts, ...r.print});
+        assert(html.includes('@top-left') && html.includes('counter(pages)') && html.includes('@page { background: #1d1815; }'), 'in the print document');
+    });
+
+    h.test('prepareExport: a page size the template does not offer falls back to A4; Slide only where listed', () => {
+        const paper = {manifest: {id: 'x', page: {margin: '20mm'}}, template: {}};
+        const deck = {manifest: {id: 'y', page: {margin: '14mm', sizes: ['Slide', 'A4']}}, template: {}};
+        assert(pipeline.prepareExport('# T', paper, {pageSize: 'Slide'}).pageOpts.pageSize === 'A4', 'no Slide without it');
+        const r = pipeline.prepareExport('# T', deck, {pageSize: 'Slide', orientation: 'portrait'});
+        assert(r.pageOpts.pageSize === 'Slide' && r.pageOpts.orientation === 'landscape', JSON.stringify(r.pageOpts));
+        for (const t of ALL) {
+            if ((t.manifest.page.sizes || []).includes('Slide')) continue;
+            assert(pipeline.prepareExport('# T', t, {pageSize: 'Slide'}).pageOpts.pageSize === 'A4', `${t.manifest.id}: A4`);
+        }
+    });
+
+    h.test('prepareExport without a cover or template', () => {
+        const noCover = {manifest: {id: 'x'}, template: {renderCover: () => null}};
+        assert(pipeline.prepareExport('# T', noCover).coverHTML === '', 'renderCover null -> no cover');
+        const bare = pipeline.prepareExport('# T\n\ntext', null);
+        assert(bare.coverHTML === '' && bare.warnings.length === 0 && bare.bodyHTML.includes('<p>text</p>'), JSON.stringify(bare));
+    });
+
+    h.test('every #link in markdown-showcase.md reaches a heading id', async () => {
+        const src = await (await fetch('../markdown-showcase.md')).text();
+        const box = document.createElement('div');
+        box.innerHTML = pipeline.prepareExport(src, DEFAULT).bodyHTML;
+        const ids = new Set([...box.querySelectorAll('[id]')].map(el => el.id));
+        const links = [...box.querySelectorAll('a[href^="#"]')].map(a => a.getAttribute('href').slice(1)).filter(Boolean);
+        assert(links.length > 10, 'found the table of contents links: ' + links.length);
+        const broken = links.filter(id => !ids.has(decodeURIComponent(id)));
+        assert(broken.length === 0, 'links to missing ids: ' + broken.join(', '));
+    });
+
+    h.test('every vendored font face loads over http', async () => {
+        const style = document.createElement('style');
+        style.textContent = fonts.fontFaceCSS();
+        document.head.appendChild(style);
+        try {
+            for (const f of fonts.FONT_FACES) {
+                // The symbol faces' unicode-range has no space: ask for a character they hold.
+                const sample = {'Noto Sans Symbols 2': '★', 'Noto Sans Symbols': '⚙'};
+                const text = f.subset === 'symbols' ? (sample[f.family] || '→') : ' ';
+                const loaded = await document.fonts.load(`${f.style} ${f.weight} 16px "${f.family}"`, text);
+                assert(loaded.length === 1 && loaded[0].status === 'loaded', `${f.family} ${f.weight} ${f.style} did not load`);
+            }
+        } finally {
+            style.remove();
+        }
+    });
+
+    h.test('plain ASCII fetches only latin font files; "Dvořák in Łódź" adds the latin-ext ones', async () => {
+        const fetched = (subset) => performance.getEntriesByType('resource')
+            .map(e => e.name).filter(n => n.includes('/vendor/fonts/') && n.includes(`-${subset}-`));
+        const style = document.createElement('style');
+        style.textContent = fonts.fontFaceCSS();
+        document.head.appendChild(style);
+        try {
+            for (const family of ['Montserrat', 'Inter', 'Source Serif Pro']) {
+                await document.fonts.load(`400 16px "${family}"`, 'Plain ASCII text');
+            }
+            assert(fetched('latin').length >= 3, 'latin files fetched: ' + fetched('latin').length);
+            assert(fetched('latin-ext').length === 0, 'no latin-ext for ASCII: ' + fetched('latin-ext').join(', '));
+            for (const family of ['Montserrat', 'Inter', 'Source Serif Pro']) {
+                const faces = await document.fonts.load(`400 16px "${family}"`, 'Dvořák in Łódź, Māori, Ștefan');
+                assert(faces.length === 2 && faces.every(f => f.status === 'loaded'), `${family}: latin and latin-ext loaded, got ${faces.length}`);
+            }
+            const ext = fetched('latin-ext');
+            assert(ext.length === 3 && ext.every(n => /-latin-ext-400-normal\.woff2$/.test(n)), 'latin-ext 400 fetched for each family: ' + ext.join(', '));
+        } finally {
+            style.remove();
+        }
+    });
+
+    /** The print document for the showcase, as the snapshot records it. */
+    async function showcasePrintDocument() {
+        const src = await (await fetch('../markdown-showcase.md')).text();
+        const tpl = entry(CORE_SNAPSHOT_TEMPLATE);
+        const p = pipeline.prepareExport(src, tpl, {date: DATE, pageSize: 'A4', orientation: 'portrait'});
+        const html = printDoc.buildPrintDocument({
+            title: p.doc.title, templateId: tpl.manifest.id, templateCSS: tpl.styles, hljsCSS: '',
+            bodyHTML: p.bodyHTML, coverHTML: p.coverHTML, pageOpts: p.pageOpts,
+        });
+        return html.split(location.origin).join('http://ORIGIN');
+    }
+
+    function firstDifference(a, b) {
+        const al = a.split('\n');
+        const bl = b.split('\n');
+        for (let i = 0; i < Math.max(al.length, bl.length); i++) {
+            if (al[i] !== bl[i]) {
+                return `line ${i + 1}\n  fixture: ${(bl[i] ?? '<end>').slice(0, 160)}\n  actual:  ${(al[i] ?? '<end>').slice(0, 160)}`;
+            }
+        }
+        return 'same lines';
+    }
+
+    h.test('snapshot: showcase print document matches tests/fixtures/showcase-print.html', async () => {
+        const actual = await showcasePrintDocument();
+        SNAPSHOTS['showcase-print.html'] = actual;
+        const resp = await fetch('fixtures/showcase-print.html', {cache: 'no-store'});
+        assert(resp.ok, 'fixture missing: run node tests/update-snapshots.mjs');
+        const fixture = await resp.text();
+        assert(actual === fixture, 'differs from the fixture (refresh with node tests/update-snapshots.mjs if intended): '
+            + firstDifference(actual, fixture));
+    });
+
+    h.run().then(() => { window.__snapshotsReady = true; });
+</script>
+</body>
+</html>

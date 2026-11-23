@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Text Insert Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>text-insert.js tests</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<textarea id="visible"></textarea>
+<div style="display:none"><textarea id="hidden"></textarea></div>
+<input id="other" type="text">
+<script type="module">
+    import * as ti from '../js/text-insert.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('TEXTINSERT');
+
+    function prepare(id, value) {
+        const el = document.getElementById(id);
+        el.value = value;
+        const inputs = [];
+        const listener = () => inputs.push(el.value);
+        el.addEventListener('input', listener);
+        return {el, inputs, done: () => el.removeEventListener('input', listener)};
+    }
+
+    h.test('visible textarea: replaces the range (native path when the browser allows it)', () => {
+        const {el, inputs, done} = prepare('visible', 'hello world');
+        ti.replaceRange(el, 6, 11, 'there');
+        done();
+        assert(el.value === 'hello there', `value ${JSON.stringify(el.value)}`);
+        assert(inputs.length >= 1, 'no input event, so preview/autosave would not run');
+    });
+
+    h.test('hidden textarea (Preview-only view): falls back to setting the value and fires input', () => {
+        const {el, inputs, done} = prepare('hidden', 'abc');
+        document.getElementById('other').focus();
+        const native = ti.replaceRange(el, 1, 2, 'XYZ');
+        done();
+        assert(native === false, 'expected the fallback path');
+        assert(el.value === 'aXYZc', `value ${JSON.stringify(el.value)}`);
+        assert(inputs.length === 1 && inputs[0] === 'aXYZc', `input events ${JSON.stringify(inputs)}`);
+        assert(el.selectionStart === 4 && el.selectionEnd === 4, `caret ${el.selectionStart}-${el.selectionEnd}`);
+        assert(document.getElementById('other').value === '', 'text was typed into the focused input instead');
+    });
+
+    h.test('execCommand returning false: fallback edits the textarea', () => {
+        const {el, inputs, done} = prepare('visible', 'one two');
+        const fakeDoc = {get activeElement() { return el; }, execCommand: () => false};
+        const native = ti.replaceRange(el, 4, 7, '2', fakeDoc);
+        done();
+        assert(native === false, 'expected the fallback path');
+        assert(el.value === 'one 2', `value ${JSON.stringify(el.value)}`);
+        assert(inputs.length === 1, `input events ${inputs.length}`);
+    });
+
+    h.test('execCommand throwing (unsupported): fallback edits the textarea', () => {
+        const {el, done} = prepare('visible', '');
+        const fakeDoc = {get activeElement() { return el; }, execCommand: () => { throw new Error('not supported'); }};
+        ti.replaceRange(el, 0, 0, '# Title', fakeDoc);
+        done();
+        assert(el.value === '# Title', `value ${JSON.stringify(el.value)}`);
+    });
+
+    h.test('execCommand "succeeding" without changing the text: fallback still applies the edit', () => {
+        const {el, done} = prepare('visible', 'keep');
+        const fakeDoc = {get activeElement() { return el; }, execCommand: () => true};
+        ti.replaceRange(el, 4, 4, ' going', fakeDoc);
+        done();
+        assert(el.value === 'keep going', `value ${JSON.stringify(el.value)}`);
+    });
+
+    h.run();
+</script>
+</body>
+</html>

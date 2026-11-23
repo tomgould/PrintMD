@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Blocked upgrade timeout Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>An old tab that never closes: the new tab explains the memory fallback</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script type="module">
+    // The app runs in this page (tests/lib/old-tab.js) so the store's blocked-open
+    // wait can be cut from 5 s to 300 ms before it starts. The waiting note and its
+    // recovery against the real index.html are blocked-upgrade.test.html.
+    import {createHarness, assert} from './lib/harness.js';
+    import {bootHereBehindOldTab, shown, waitFor, waitNote} from './lib/old-tab.js';
+
+    const h = createHarness('BLOCKEDTIMEOUT');
+    const WAIT_MS = 300;
+
+    h.test('when the wait runs out, the waiting note gives way to a banner that says what to do', async () => {
+        const {old, win, doc, booted} = await bootHereBehindOldTab(WAIT_MS);
+        try {
+            await waitFor(() => shown(waitNote(doc)), 'the wait note');
+            // 300 ms was asked for: 3 s is plenty, and far short of the 5 s default.
+            await waitFor(() => win.__bd.usingMemoryStore, 'the memory fallback within 3 s', 3000);
+            await booted;
+            assert(win.__bd.usingMemoryStore, 'memory fallback after the wait');
+            assert(!shown(waitNote(doc)), 'wait note hidden');
+            const banner = doc.getElementById('storage-banner');
+            assert(!banner.hidden, 'storage banner shown');
+            assert(/another PrintMD tab/i.test(banner.textContent) && /reload/i.test(banner.textContent), 'banner says why and what to do: ' + banner.textContent);
+            assert(banner.getAttribute('role') === 'alert', 'the banner is an alert');
+            assert(!doc.getElementById('editor').readOnly, 'the editor is usable (memory only)');
+            assert(doc.getElementById('autosave-status').textContent === 'Kept in memory only', 'footer: ' + doc.getElementById('autosave-status').textContent);
+        } finally {
+            old.close();
+        }
+    });
+
+    h.test('the default wait is still 5 s; a bad value restores it', async () => {
+        const store = await import('../js/store.js');
+        assert(store.OPEN_BLOCKED_TIMEOUT_MS === 5000, 'default ' + store.OPEN_BLOCKED_TIMEOUT_MS);
+        assert(store.openBlockedTimeout() === WAIT_MS, 'this page shortened it: ' + store.openBlockedTimeout());
+        store.setOpenBlockedTimeout('soon');
+        assert(store.openBlockedTimeout() === 5000, 'restored: ' + store.openBlockedTimeout());
+    });
+
+    h.run();
+</script>
+</body>
+</html>

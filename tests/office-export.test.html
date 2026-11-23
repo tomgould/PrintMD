@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Office Export Smoke Test</title>
+</head>
+<body>
+<div id="result">Running…</div>
+
+<!-- Vendored globals must load first -->
+<script src="../vendor/jszip/jszip.min.js"></script>
+<!-- As in index.html: keep the browser's own trim and parseInt around pptxgen's core-js. -->
+<script src="../js/builtins-save.js"></script>
+<script src="../vendor/pptxgenjs/pptxgen.bundle.js"></script>
+<script src="../js/builtins-restore.js"></script>
+
+<script type="module">
+import { docxBlob } from '../js/docx-export.js';
+import { pptxBlob } from '../js/pptx-export.js';
+import { getTemplates } from '../js/templates.js';
+
+const templateEntry = getTemplates()[0];
+
+const doc = { title: 'Smoke Test Deck', author: 'CI', date: '14 June 2026', brand: 'Example Co' };
+const renderedHTML = '<h1>Intro</h1><p>Hello world paragraph.</p><ul><li>Point one</li><li>Point two</li></ul><hr><h2>Second</h2><p>More text.</p>';
+
+async function firstBytes(blob) {
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    return [buf[0], buf[1]];
+}
+
+(async () => {
+    try {
+        const d = await docxBlob(doc, templateEntry, renderedHTML, { orientation: 'portrait', margin: '20mm' });
+        const [d0, d1] = await firstBytes(d);
+
+        const p = await pptxBlob(doc, templateEntry, renderedHTML, { orientation: 'portrait' });
+        const [p0, p1] = await firstBytes(p);
+
+        const docxOk = d.size > 0 && d0 === 0x50 && d1 === 0x4B;
+        const pptxOk = p.size > 0 && p0 === 0x50 && p1 === 0x4B;
+        const ok = docxOk && pptxOk;
+
+        document.getElementById('result').textContent =
+            `docx: size=${d.size} ok=${docxOk} | pptx: size=${p.size} ok=${pptxOk} | overall=${ok ? 'PASS' : 'FAIL'}`;
+        document.title = ok ? 'SMOKE_PASS' : 'SMOKE_FAIL';
+    } catch (e) {
+        document.title = 'SMOKE_FAIL';
+        document.getElementById('result').textContent = 'ERROR: ' + e.message;
+    }
+})();
+</script>
+</body>
+</html>

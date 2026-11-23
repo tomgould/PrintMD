@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Word Export Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+<h1>docx-export.js</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<script src="../vendor/jszip/jszip.min.js"></script>
+<script src="../vendor/marked/marked.min.js"></script>
+<script src="../vendor/dompurify/purify.min.js"></script>
+<script src="../vendor/highlightjs/highlight.min.js"></script>
+<script src="../vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as docx from '../js/docx-export.js';
+    import * as pipeline from '../js/export-pipeline.js';
+    import * as md from '../js/markdown.js';
+    import {getTemplates} from '../js/templates.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    // The fixture this page builds is also handed to tests/office-convert.mjs
+    // (window.__officeFiles), which opens it in LibreOffice.
+    window.__officeFiles = {};
+
+    const h = createHarness('DOCX');
+    md.configureMarked();
+    const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+
+    // Child order from ECMA-376 Part 1 (CT_PPrBase 17.3.1.26, CT_RPr 17.3.2.28,
+    // CT_TcPr 17.4.70, CT_TblPr 17.4.60, CT_TrPr 17.4.79). Word rejects a file whose
+    // properties are out of this order; LibreOffice does not, so only a test catches it.
+    const ORDER = {
+        pPr: ['pStyle', 'keepNext', 'keepLines', 'pageBreakBefore', 'framePr', 'widowControl', 'numPr',
+            'suppressLineNumbers', 'pBdr', 'shd', 'tabs', 'suppressAutoHyphens', 'kinsoku', 'wordWrap',
+            'overflowPunct', 'topLinePunct', 'autoSpaceDE', 'autoSpaceDN', 'bidi', 'adjustRightInd',
+            'snapToGrid', 'spacing', 'ind', 'contextualSpacing', 'mirrorIndents', 'suppressOverlap', 'jc',
+            'textDirection', 'textAlignment', 'textboxTightWrap', 'outlineLvl', 'divId', 'cnfStyle', 'rPr',
+            'sectPr', 'pPrChange'],
+        rPr: ['rStyle', 'rFonts', 'b', 'bCs', 'i', 'iCs', 'caps', 'smallCaps', 'strike', 'dstrike', 'outline',
+            'shadow', 'emboss', 'imprint', 'noProof', 'snapToGrid', 'vanish', 'webHidden', 'color', 'spacing',
+            'w', 'kern', 'position', 'sz', 'szCs', 'highlight', 'u', 'effect', 'bdr', 'shd', 'fitText',
+            'vertAlign', 'rtl', 'cs', 'em', 'lang', 'eastAsianLayout', 'specVanish', 'oMath'],
+        tcPr: ['cnfStyle', 'tcW', 'gridSpan', 'hMerge', 'vMerge', 'tcBorders', 'shd', 'noWrap', 'tcMar',
+            'textDirection', 'tcFitText', 'vAlign', 'hideMark'],
+        tblPr: ['tblStyle', 'tblpPr', 'tblOverlap', 'bidiVisual', 'tblStyleRowBandSize', 'tblStyleColBandSize',
+            'tblW', 'jc', 'tblCellSpacing', 'tblInd', 'tblBorders', 'shd', 'tblLayout', 'tblCellMar', 'tblLook'],
+        trPr: ['cnfStyle', 'divId', 'gridBefore', 'gridAfter', 'wBefore', 'wAfter', 'cantSplit', 'trHeight',
+            'tblHeader', 'tblCellSpacing', 'jc', 'hidden'],
+    };
+
+    const FIXTURE_MD = [
+        '---',
+        'title: Fixture Report',
+        'author: Jo Bloggs',
+        'date: 2026-03-01',
+        '---',
+        '# Fixture heading',
+        '',
+        '1. Alpha one',
+        '2. Alpha two',
+        '',
+        'A paragraph between lists.',
+        '',
+        '1. Beta one',
+        '2. Beta two',
+        '',
+        'Another paragraph.',
+        '',
+        '5. Gamma five',
+        '6. Gamma six',
+        '',
+        '- Outer bullet',
+        '  1. Inner one',
+        '  2. Inner two',
+        '- Outer second',
+        '',
+        'Tasks:',
+        '',
+        '- [ ] Todo item',
+        '- [x] Done item',
+        '',
+        'See [the site](https://example.com/a?b=1&c=2) and [the heading](#fixture-heading) and [a script](javascript:alert(1)).',
+        'Line one\\',
+        'Line two',
+        '',
+        'Bad\u0001char and\u000Bvertical tab.' + String.fromCharCode(0xfffe, 0xffff, 0xd800),
+        '',
+        `<a href="https://example.com/x\u0001${String.fromCharCode(0xfffe)}y">odd link</a>`,
+        '',
+        '<table><tr><th colspan="2">Both columns</th></tr><tr><td>Cell A</td><td>Cell B</td></tr>'
+            + '<tr><td rowspan="2">Tall cell</td><td>Row one</td></tr><tr><td>Row two</td></tr>'
+            + '<tr><td>Outer cell</td><td><table><tr><td>Inner cell</td></tr></table></td></tr></table>',
+        '',
+        '<div>Loose div text <span>span text</span><p>Para in div</p>tail text</div>',
+        '',
+        '<details><summary>Summary text</summary>Details body text</details>',
+        '',
+        '```js',
+        'const answer = 42;',
+        '  indented();',
+        '```',
+        '',
+    ].join('\n');
+
+    let cached = null;
+    /** The fixture as a docx, unzipped and parsed once for every test. */
+    async function fixture() {
+        if (cached) return cached;
+        const entry = getTemplates()[0];
+        const prepared = pipeline.prepareExport(FIXTURE_MD, entry, {date: new Date(2026, 0, 15)});
+        const blob = await docx.docxBlob(prepared.doc, entry, prepared.bodyHTML, prepared.pageOpts);
+        const buf = await blob.arrayBuffer();
+        const zip = await JSZip.loadAsync(buf);
+        const parts = {};
+        for (const name of Object.keys(zip.files)) {
+            if (!zip.files[name].dir) parts[name] = await zip.file(name).async('string');
+        }
+        const parse = (name) => new DOMParser().parseFromString(parts[name], 'application/xml');
+        const bytes = new Uint8Array(buf);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        window.__officeFiles['fixture.docx'] = btoa(bin);
+        cached = {parts, parse, doc: parse('word/document.xml'), prepared};
+        return cached;
+    }
+
+    const all = (node, local) => Array.from(node.getElementsByTagNameNS(W, local));
+    const attr = (el, name) => el.getAttributeNS(W, name);
+    const textOf = (el) => all(el, 't').map(t => t.textContent).join('');
+    const paraWith = (doc, text) => all(doc, 'p').find(p => textOf(p).includes(text));
+    function numOf(p) {
+        const numPr = all(p, 'numPr')[0];
+        if (!numPr) return null;
+        return {numId: attr(all(numPr, 'numId')[0], 'val'), ilvl: attr(all(numPr, 'ilvl')[0], 'val')};
+    }
+
+    h.test('every XML part parses', async () => {
+        const {parts, parse} = await fixture();
+        for (const name of Object.keys(parts)) {
+            if (!/\.(xml|rels)$/.test(name)) continue;
+            const err = parse(name).getElementsByTagName('parsererror')[0];
+            assert(!err, `${name}: ${err && err.textContent.slice(0, 200)}`);
+        }
+    });
+
+    h.test('each numbered list restarts, and start="5" starts at 5', async () => {
+        const {doc, parse} = await fixture();
+        const ids = ['Alpha one', 'Beta one', 'Gamma five'].map(t => numOf(paraWith(doc, t)));
+        assert(ids.every(Boolean), 'list paragraphs are numbered');
+        assert(new Set(ids.map(n => n.numId)).size === 3, 'three lists, three numIds: ' + JSON.stringify(ids));
+        assert(numOf(paraWith(doc, 'Alpha two')).numId === ids[0].numId, 'items of one list share its numId');
+        const numbering = parse('word/numbering.xml');
+        const startFor = (numId) => {
+            const num = all(numbering, 'num').find(n => attr(n, 'numId') === numId);
+            assert(num, 'w:num ' + numId + ' exists');
+            const so = all(num, 'startOverride')[0];
+            return so ? attr(so, 'val') : null;
+        };
+        assert(startFor(ids[0].numId) === '1', 'Alpha starts at 1');
+        assert(startFor(ids[1].numId) === '1', 'Beta restarts at 1');
+        assert(startFor(ids[2].numId) === '5', 'Gamma starts at 5');
+        const abstract = (numId) => attr(all(all(numbering, 'num').find(n => attr(n, 'numId') === numId), 'abstractNumId')[0], 'val');
+        const fmt = all(all(numbering, 'abstractNum').find(a => attr(a, 'abstractNumId') === abstract(ids[0].numId)), 'numFmt')[0];
+        assert(attr(fmt, 'val') === 'decimal', 'ordered lists use a decimal format');
+    });
+
+    h.test('nested lists keep their levels', async () => {
+        const {doc} = await fixture();
+        const outer = numOf(paraWith(doc, 'Outer bullet'));
+        const inner = numOf(paraWith(doc, 'Inner one'));
+        const second = numOf(paraWith(doc, 'Outer second'));
+        assert(outer && outer.ilvl === '0', 'outer bullet at level 0');
+        assert(inner && inner.ilvl === '1', 'inner item at level 1: ' + JSON.stringify(inner));
+        assert(second && second.numId === outer.numId && second.ilvl === '0', 'outer list continues after the nested one');
+        assert(inner.numId !== outer.numId, 'the nested ordered list has its own numbering');
+    });
+
+    h.test('XML-illegal control characters are stripped', async () => {
+        const {parts, doc} = await fixture();
+        assert(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(parts['word/document.xml']), 'no control characters in document.xml');
+        assert(paraWith(doc, 'Badchar and'), 'the text around them is kept');
+    });
+
+    h.test('text directly inside div, span, details and summary is kept, in order', async () => {
+        const {doc} = await fixture();
+        const body = all(doc, 'p').map(textOf).join('\n');
+        const order = ['Loose div text', 'span text', 'Para in div', 'tail text', 'Summary text', 'Details body text'];
+        let at = -1;
+        for (const t of order) {
+            const i = body.indexOf(t);
+            assert(i > at, `"${t}" present after the previous one (at ${i})`);
+            at = i;
+        }
+    });
+
+    h.test('http(s) links are hyperlinks with an external relationship; #anchors use bookmarks', async () => {
+        const {doc, parse} = await fixture();
+        const links = all(doc, 'hyperlink');
+        const ext = links.find(l => textOf(l) === 'the site');
+        assert(ext, 'a w:hyperlink holds "the site"');
+        const rid = ext.getAttributeNS(R, 'id');
+        const rel = Array.from(parse('word/_rels/document.xml.rels').getElementsByTagName('Relationship')).find(r => r.getAttribute('Id') === rid);
+        assert(rel, 'relationship ' + rid + ' exists');
+        assert(rel.getAttribute('Target') === 'https://example.com/a?b=1&c=2', 'target is the URL: ' + rel.getAttribute('Target'));
+        assert(rel.getAttribute('TargetMode') === 'External', 'external target');
+        assert(/\/hyperlink$/.test(rel.getAttribute('Type')), 'hyperlink relationship type');
+        const internal = links.find(l => textOf(l) === 'the heading');
+        assert(internal && attr(internal, 'anchor'), 'the #anchor link is an internal hyperlink');
+        const marks = all(doc, 'bookmarkStart').map(b => attr(b, 'name'));
+        assert(marks.includes(attr(internal, 'anchor')), 'its bookmark exists on the heading: ' + marks.join(','));
+        assert(attr(internal, 'anchor').length <= 40, 'bookmark names fit Word\'s 40-character limit');
+        assert(!links.some(l => textOf(l) === 'a script'), 'a javascript: link is plain text');
+        assert(paraWith(doc, 'a script'), 'its text is kept');
+    });
+
+    h.test('br becomes w:br inside the paragraph', async () => {
+        const {doc} = await fixture();
+        const p = paraWith(doc, 'Line one');
+        assert(p && textOf(p).includes('Line two'), 'both lines in one paragraph');
+        assert(all(p, 'br').length === 1, 'one w:br');
+    });
+
+    h.test('task-list checkboxes become ☐ and ☑, without a bullet', async () => {
+        const {doc} = await fixture();
+        const todo = paraWith(doc, 'Todo item');
+        const done = paraWith(doc, 'Done item');
+        assert(textOf(todo).trim().startsWith('☐'), 'unchecked: ' + textOf(todo));
+        assert(textOf(done).trim().startsWith('☑'), 'checked: ' + textOf(done));
+        assert(!numOf(todo) && !numOf(done), 'no bullet before the checkbox');
+    });
+
+    h.test('tables have a grid, gridSpan for colspan and vMerge for rowspan', async () => {
+        const {doc} = await fixture();
+        const tbl = all(doc, 'tbl').find(t => textOf(t).includes('Both columns'));
+        assert(tbl, 'table found');
+        const children = Array.from(tbl.children).map(c => c.localName);
+        assert(children[0] === 'tblPr' && children[1] === 'tblGrid', 'tblPr then tblGrid: ' + children.slice(0, 3));
+        const grid = Array.from(tbl.children[1].children);
+        assert(grid.length === 2 && grid.every(g => g.localName === 'gridCol' && Number(attr(g, 'w')) > 0), 'two grid columns');
+        const rows = Array.from(tbl.children).filter(c => c.localName === 'tr');
+        const cells = (tr) => Array.from(tr.children).filter(c => c.localName === 'tc');
+        const span = all(cells(rows[0])[0], 'gridSpan')[0];
+        assert(cells(rows[0]).length === 1 && span && attr(span, 'val') === '2', 'header cell spans two columns');
+        const start = all(cells(rows[2])[0], 'vMerge')[0];
+        const cont = all(cells(rows[3])[0], 'vMerge')[0];
+        assert(start && attr(start, 'val') === 'restart', 'rowspan starts a vertical merge');
+        assert(cont && !attr(cont, 'val'), 'the next row continues it');
+        assert(cells(rows[3]).length === 2 && textOf(cells(rows[3])[1]) === 'Row two', 'the covered row keeps its own cell');
+        for (const row of rows) {
+            const width = cells(row).reduce((n, c) => {
+                const s = all(c, 'gridSpan')[0];
+                return n + (s && s.parentNode.parentNode === c ? Number(attr(s, 'val')) : 1);
+            }, 0);
+            assert(width === 2, 'every row covers the whole grid');
+        }
+    });
+
+    h.test('a nested table sits in its cell, and every cell ends with a paragraph', async () => {
+        const {doc} = await fixture();
+        const inner = all(doc, 'tbl').find(t => textOf(t) === 'Inner cell');
+        assert(inner && inner.parentNode.localName === 'tc', 'nested table inside a w:tc');
+        for (const tc of all(doc, 'tc')) {
+            assert(tc.lastElementChild && tc.lastElementChild.localName === 'p', 'cell ends with w:p');
+        }
+    });
+
+    h.test('pPr, rPr, tblPr, trPr and tcPr children follow the ECMA-376 order', async () => {
+        const {doc, parse} = await fixture();
+        const docs = [doc, parse('word/styles.xml'), parse('word/numbering.xml')];
+        let checked = 0;
+        for (const [name, order] of Object.entries(ORDER)) {
+            for (const d of docs) {
+                for (const el of all(d, name)) {
+                    let last = -1;
+                    for (const child of el.children) {
+                        const i = order.indexOf(child.localName);
+                        assert(i !== -1, `${name}: unexpected child ${child.localName}`);
+                        assert(i > last, `${name}: ${child.localName} after ${order[last]}`);
+                        last = i;
+                    }
+                    checked++;
+                }
+            }
+        }
+        assert(checked > 20, 'checked ' + checked + ' property elements');
+    });
+
+    h.test('code blocks keep their lines and leading spaces in a monospace run', async () => {
+        const {doc} = await fixture();
+        const p = paraWith(doc, 'const answer = 42;');
+        assert(p, 'code paragraph found');
+        assert(textOf(p).includes('  indented();'), 'leading spaces kept: ' + JSON.stringify(textOf(p)));
+        assert(all(p, 'rFonts').length > 0, 'monospace font set');
+        // The PDF's language label is CSS generated content (pre[data-lang]::before): never text in Word.
+        assert(/<pre data-lang="JavaScript"/.test((await fixture()).prepared.bodyHTML), 'the rendered block carries data-lang');
+        assert(!/javascript/i.test(textOf(doc.documentElement)), 'no label text in the document');
+    });
+
+    h.test('front matter: title, author and date reach the core properties and the cover, not the body', async () => {
+        const {parts, parse, doc, prepared} = await fixture();
+        assert(prepared.doc.title === 'Fixture Report', 'docMeta title from front matter');
+        const core = parse('docProps/core.xml');
+        const get = (local) => (Array.from(core.getElementsByTagName('*')).find(e => e.localName === local) || {}).textContent;
+        assert(get('title') === 'Fixture Report', 'dc:title: ' + get('title'));
+        assert(get('creator') === 'Jo Bloggs', 'dc:creator: ' + get('creator'));
+        assert(/^2026-03-01T/.test(get('created') || ''), 'dcterms:created from the date: ' + get('created'));
+        const ps = all(doc, 'p').map(textOf);
+        assert(ps[0] === 'Fixture Report', 'cover title first: ' + ps[0]);
+        assert(ps.includes('Prepared by Jo Bloggs'), 'cover author');
+        assert(ps.includes('1 March 2026'), 'cover date');
+        const xml = parts['word/document.xml'];
+        assert(!/title:|author:|date: 2026/.test(xml), 'no front matter lines in the body');
+        assert(/core-properties/.test(parts['_rels/.rels']), 'package links the core properties');
+        assert(/docProps\/core\.xml/.test(parts['[Content_Types].xml']), 'content type for core.xml');
+    });
+
+    /** A small docx from HTML, unzipped: document.xml parsed, warnings collected. */
+    async function docxFrom(html, opts = {}) {
+        const warnings = [];
+        const blob = await docx.docxBlob({title: 'T', author: '', date: ''}, getTemplates()[0], html,
+            {...opts, onWarning: (w) => warnings.push(w)});
+        const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+        const parts = {};
+        for (const name of Object.keys(zip.files)) {
+            if (!zip.files[name].dir) parts[name] = await zip.file(name).async('string');
+        }
+        const parse = (name) => new DOMParser().parseFromString(parts[name], 'application/xml');
+        return {parts, parse, doc: parse('word/document.xml'), warnings};
+    }
+
+    h.test('a table with no rows is left out, so Word never sees an empty w:tbl', async () => {
+        const {doc} = await docxFrom('<p>before</p><table></table><table><tbody></tbody></table><table><tr></tr></table><p>after</p>');
+        for (const tbl of all(doc, 'tbl')) {
+            const rows = Array.from(tbl.children).filter(c => c.localName === 'tr');
+            assert(rows.length > 0, 'every w:tbl has a w:tr');
+            for (const tr of rows) assert(Array.from(tr.children).some(c => c.localName === 'tc'), 'every w:tr has a w:tc');
+        }
+        assert(paraWith(doc, 'before') && paraWith(doc, 'after'), 'the text around them is kept');
+    });
+
+    h.test('a table wider than 63 columns is cut to 63, with a warning', async () => {
+        const cells = (tag, p) => Array.from({length: 200}, (_, i) => `<${tag}>${p}${i}</${tag}>`).join('');
+        const {doc, warnings} = await docxFrom(`<table><tr>${cells('th', 'c')}</tr><tr>${cells('td', 'v')}</tr><tr><td colspan="100">wide</td><td>after wide</td></tr></table>`);
+        const tbl = all(doc, 'tbl')[0];
+        const grid = all(tbl, 'gridCol');
+        assert(grid.length === 63, '63 grid columns: ' + grid.length);
+        for (const tr of all(tbl, 'tr')) {
+            const width = Array.from(tr.children).filter(c => c.localName === 'tc').reduce((n, tc) => {
+                const span = all(tc, 'gridSpan')[0];
+                return n + (span ? Number(attr(span, 'val')) : 1);
+            }, 0);
+            assert(width === 63, 'each row covers 63 columns: ' + width);
+        }
+        const text = all(tbl, 't').map(t => t.textContent);
+        assert(text.includes('v62') && !text.includes('v63'), 'columns past the 63rd are left out');
+        assert(warnings.length === 1 && /63 columns/.test(warnings[0]), 'one warning: ' + JSON.stringify(warnings));
+    });
+
+    h.test('images are left out with one warning that counts them, data: URIs and web addresses alike', async () => {
+        // Inert: docxBlob parses into a DOMParser document, so no image is fetched.
+        const html = '<p>A <img src="data:image/png;base64,iVBORw0KGgo=" alt="a"> and '
+            + '<img src="https://images.example/b.png" alt="b"></p>'
+            + '<table><tr><td><img src="https://images.example/c.png" alt="c"></td></tr></table>'
+            + '<p><a href="https://example.com/"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="d"></a></p>'
+            + '<ul><li>item <img src="/assets/e.png" alt="e"></li></ul>'
+            + '<p><img alt="no source"> <img src="  " alt="blank source"></p>';
+        const {doc, warnings} = await docxFrom(html);
+        assert(!/<w:drawing|<w:pict/.test(new XMLSerializer().serializeToString(doc)), 'no image is embedded');
+        assert(paraWith(doc, 'item'), 'the text around them is kept');
+        assert(warnings.length === 1, 'one warning: ' + JSON.stringify(warnings));
+        assert(warnings[0] === '5 images were left out of the Word file; the PDF keeps them.', 'counted: ' + warnings[0]);
+        assert(docx.countWordImages(html) === 5, 'the preflight count matches: ' + docx.countWordImages(html));
+        const one = await docxFrom('<p><img src="data:image/png;base64,iVBORw0KGgo=" alt="x"></p>');
+        assert(one.warnings.join() === '1 image was left out of the Word file; the PDF keeps it.', 'singular: ' + one.warnings);
+        const none = await docxFrom('<p>No pictures here.</p>');
+        assert(none.warnings.length === 0, 'no images, no warning: ' + JSON.stringify(none.warnings));
+        assert(docx.wordImagesNote(2, {before: true}) === '2 images will be left out of the Word file; the PDF keeps them.',
+            'before the export: ' + docx.wordImagesNote(2, {before: true}));
+    });
+
+    h.test('headings sharing an id get unique bookmarks; links go to the first', async () => {
+        const {doc} = await docxFrom('<h2 id="x">One</h2><h2 id="x">Two</h2><p><a href="#x">to x</a></p>');
+        const names = all(doc, 'bookmarkStart').map(b => attr(b, 'name'));
+        assert(new Set(names).size === names.length, 'bookmark names are unique: ' + names.join(','));
+        const ids = all(doc, 'bookmarkStart').map(b => attr(b, 'id'));
+        assert(new Set(ids).size === ids.length, 'bookmark ids are unique');
+        const link = all(doc, 'hyperlink')[0];
+        const target = all(doc, 'bookmarkStart').find(b => attr(b, 'name') === attr(link, 'anchor'));
+        assert(target && textOf(target.parentNode) === 'One', 'the link goes to the first heading');
+    });
+
+    h.test('hyperlink targets are valid URIs; invalid or very long ones stay plain text', async () => {
+        const long = 'https://example.com/' + 'a'.repeat(5000);
+        const {doc, parse} = await docxFrom('<p><a href="https://x.com/?a=1&amp;b=<2>&amp;c=&quot;">q</a> '
+            + '<a href="https://a.com/%ZZ">bad</a> <a href="' + long + '">long</a> <a href="mailto:a@b.c">mail</a></p>');
+        const links = all(doc, 'hyperlink').map(textOf);
+        assert(links.includes('q') && links.includes('mail'), 'valid links kept: ' + links);
+        assert(!links.includes('bad') && !links.includes('long'), 'invalid and over-long links dropped: ' + links);
+        assert(paraWith(doc, 'bad') && paraWith(doc, 'long'), 'their text is kept');
+        for (const rel of parse('word/_rels/document.xml.rels').getElementsByTagName('Relationship')) {
+            if (rel.getAttribute('TargetMode') !== 'External') continue;
+            const t = rel.getAttribute('Target');
+            assert(!/[\s<>"{}|\\^`]|%(?![0-9A-Fa-f]{2})/.test(t) && t.length <= 2000, 'a valid URI: ' + t);
+            assert(new URL(t).href === t, 'normalised: ' + t);
+        }
+    });
+
+    h.test('a list item that starts with a heading, code or a table gets no empty bullet paragraph', async () => {
+        const {doc} = await docxFrom('<ul><li><h3>Head</h3></li><li><pre><code>code()</code></pre></li>'
+            + '<li><table><tr><td>cell</td></tr></table></li><li>plain</li></ul>');
+        const empty = all(doc, 'p').filter(p => numOf(p) && !textOf(p).trim());
+        assert(empty.length === 0, empty.length + ' empty numbered paragraph(s)');
+        assert(numOf(paraWith(doc, 'Head')), 'the heading carries the bullet');
+        assert(numOf(paraWith(doc, 'code()')), 'the code block carries the bullet');
+        assert(numOf(paraWith(doc, 'plain')), 'a plain item keeps its bullet');
+    });
+
+    h.test('every relationship target exists in the package', async () => {
+        const {parts, parse} = await fixture();
+        const rels = parse('word/_rels/document.xml.rels').getElementsByTagName('Relationship');
+        for (const r of rels) {
+            if (r.getAttribute('TargetMode') === 'External') continue;
+            assert(parts['word/' + r.getAttribute('Target')], 'missing part ' + r.getAttribute('Target'));
+        }
+    });
+
+    h.run();
+</script>
+</body>
+</html>

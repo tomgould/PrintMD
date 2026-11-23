@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Busy page</title>
+</head>
+<body>
+<!-- For tests/runner.test.mjs: the renderer's main thread stays busy for 60 s, so
+     DevTools Runtime.evaluate calls get no answer until it is done. -->
+<script>
+    const end = Date.now() + 60000;
+    while (Date.now() < end) { /* busy */ }
+    document.title = 'BUSY_PASS';
+</script>
+</body>
+</html>

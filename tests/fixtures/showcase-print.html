@@ -1,0 +1,2110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Markdown Showcase</title>
+  <style>
+/* Brand fonts, served from vendor/fonts/ (js/fonts.js) */
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 300;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-300-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 300;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-ext-300-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 800;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-800-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 800;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-ext-800-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-900-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-ext-900-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-400-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-ext-400-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: italic;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-600-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: italic;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/montserrat/montserrat-latin-ext-600-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 100 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-400-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 100 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-ext-400-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 600 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-700-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 600 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/inter/inter-latin-ext-700-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Source Serif Pro';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-serif-pro/source-serif-pro-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Source Serif Pro';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-serif-pro/source-serif-pro-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02AF,U+0304,U+0308,U+0329,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20CF,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Source Serif Pro';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-serif-pro/source-serif-pro-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Source Serif Pro';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-serif-pro/source-serif-pro-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02AF,U+0304,U+0308,U+0329,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20CF,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Source Serif Pro';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-serif-pro/source-serif-pro-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Source Serif Pro';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-serif-pro/source-serif-pro-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02AF,U+0304,U+0308,U+0329,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20CF,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Source Serif Pro';
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-serif-pro/source-serif-pro-latin-400-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Source Serif Pro';
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-serif-pro/source-serif-pro-latin-ext-400-italic.woff2") format("woff2");
+  unicode-range: U+0100-02AF,U+0304,U+0308,U+0329,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20CF,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Source Serif Pro';
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-serif-pro/source-serif-pro-latin-700-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Source Serif Pro';
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-serif-pro/source-serif-pro-latin-ext-700-italic.woff2") format("woff2");
+  unicode-range: U+0100-02AF,U+0304,U+0308,U+0329,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20CF,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 800;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-800-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 800;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-ext-800-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-400-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/figtree/figtree-latin-ext-400-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/fraunces/fraunces-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/fraunces/fraunces-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/fraunces/fraunces-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/fraunces/fraunces-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/fraunces/fraunces-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/fraunces/fraunces-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/fraunces/fraunces-latin-400-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/fraunces/fraunces-latin-ext-400-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/schibsted-grotesk/schibsted-grotesk-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/schibsted-grotesk/schibsted-grotesk-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/schibsted-grotesk/schibsted-grotesk-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/schibsted-grotesk/schibsted-grotesk-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: normal;
+  font-weight: 800;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/schibsted-grotesk/schibsted-grotesk-latin-800-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: normal;
+  font-weight: 800;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/schibsted-grotesk/schibsted-grotesk-latin-ext-800-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/schibsted-grotesk/schibsted-grotesk-latin-500-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/schibsted-grotesk/schibsted-grotesk-latin-ext-500-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Libre Caslon Text';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/libre-caslon-text/libre-caslon-text-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Libre Caslon Text';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/libre-caslon-text/libre-caslon-text-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Libre Caslon Text';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/libre-caslon-text/libre-caslon-text-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Libre Caslon Text';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/libre-caslon-text/libre-caslon-text-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Libre Caslon Text';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/libre-caslon-text/libre-caslon-text-latin-400-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Libre Caslon Text';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/libre-caslon-text/libre-caslon-text-latin-ext-400-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/plus-jakarta-sans/plus-jakarta-sans-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/plus-jakarta-sans/plus-jakarta-sans-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/plus-jakarta-sans/plus-jakarta-sans-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/plus-jakarta-sans/plus-jakarta-sans-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 800;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/plus-jakarta-sans/plus-jakarta-sans-latin-800-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 800;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/plus-jakarta-sans/plus-jakarta-sans-latin-ext-800-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/ibm-plex-sans/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/ibm-plex-sans/ibm-plex-sans-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/ibm-plex-sans/ibm-plex-sans-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/ibm-plex-sans/ibm-plex-sans-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/ibm-plex-sans/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/ibm-plex-sans/ibm-plex-sans-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/ibm-plex-sans/ibm-plex-sans-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/ibm-plex-sans/ibm-plex-sans-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/ibm-plex-sans/ibm-plex-sans-latin-400-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/ibm-plex-sans/ibm-plex-sans-latin-ext-400-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/lora/lora-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/lora/lora-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/lora/lora-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/lora/lora-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/lora/lora-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/lora/lora-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/lora/lora-latin-500-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/lora/lora-latin-ext-500-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/dm-sans/dm-sans-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/dm-sans/dm-sans-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/dm-sans/dm-sans-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/dm-sans/dm-sans-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/dm-sans/dm-sans-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/dm-sans/dm-sans-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Source Code Pro';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-code-pro/source-code-pro-all-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: 'Source Code Pro';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-code-pro/source-code-pro-all-700-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: 'Source Code Pro';
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-code-pro/source-code-pro-all-400-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: 'Source Code Pro';
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-code-pro/source-code-pro-all-700-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: 'Source Code Pro Symbols';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-code-pro/source-code-pro-all-400-normal.woff2") format("woff2");
+  unicode-range: U+2190-21FF,U+2200-22FF,U+2500-25FF,U+2610-2611,U+2713;
+}
+@font-face {
+  font-family: 'Source Code Pro Symbols';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/source-code-pro/source-code-pro-all-700-normal.woff2") format("woff2");
+  unicode-range: U+2190-21FF,U+2200-22FF,U+2500-25FF,U+2610-2611,U+2713;
+}
+@font-face {
+  font-family: 'Noto Sans Symbols 2';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/noto-sans-symbols-2/noto-sans-symbols-2-symbols-400-normal.woff2") format("woff2");
+  unicode-range: U+0001-000C,U+000E-001F,U+007F-009F,U+20DD-20E0,U+20E2-20E4,U+2150-218F,U+2190,U+2192,U+2194-2199,U+21AF,U+21E6-21F0,U+21F3,U+2218-2219,U+2299,U+22C4-22C6,U+2300-243F,U+2440-244A,U+2460-24FF,U+25A0-27BF,U+2800-28FF,U+2921-2922,U+2981,U+29BF,U+29EB,U+2B00-2BFF,U+4DC0-4DFF,U+FFF9-FFFB,U+10140-1018E,U+10190-1019C,U+101A0,U+101D0-101FD,U+102E0-102FB,U+10E60-10E7E,U+1D2C0-1D2D3,U+1D2E0-1D37F,U+1F000-1F0FF,U+1F100-1F1AD,U+1F1E6-1F1FF,U+1F30D-1F30F,U+1F315,U+1F31C,U+1F31E,U+1F320-1F32C,U+1F336,U+1F378,U+1F37D,U+1F382,U+1F393-1F39F,U+1F3A7-1F3A8,U+1F3AC-1F3AF,U+1F3C2,U+1F3C4-1F3C6,U+1F3CA-1F3CE,U+1F3D4-1F3E0,U+1F3ED,U+1F3F1-1F3F3,U+1F3F5-1F3F7,U+1F408,U+1F415,U+1F41F,U+1F426,U+1F43F,U+1F441-1F442,U+1F444,U+1F446-1F449,U+1F44C-1F44E,U+1F453,U+1F46A,U+1F47D,U+1F4A3,U+1F4B0,U+1F4B3,U+1F4B9,U+1F4BB,U+1F4BF,U+1F4C8-1F4CB,U+1F4D6,U+1F4DA,U+1F4DF,U+1F4E3-1F4E6,U+1F4EA-1F4ED,U+1F4F7,U+1F4F9-1F4FB,U+1F4FD-1F4FE,U+1F503,U+1F507-1F50B,U+1F50D,U+1F512-1F513,U+1F53E-1F54A,U+1F54F-1F5FA,U+1F610,U+1F650-1F67F,U+1F687,U+1F68D,U+1F691,U+1F694,U+1F698,U+1F6AD,U+1F6B2,U+1F6B9-1F6BA,U+1F6BC,U+1F6C6-1F6CF,U+1F6D3-1F6D7,U+1F6E0-1F6EA,U+1F6F0-1F6F3,U+1F6F7-1F6FC,U+1F700-1F7FF,U+1F800-1F80B,U+1F810-1F847,U+1F850-1F859,U+1F860-1F887,U+1F890-1F8AD,U+1F8B0-1F8BB,U+1F8C0-1F8C1,U+1F900-1F90B,U+1F93B,U+1F946,U+1F984,U+1F996,U+1F9E9,U+1FA00-1FA6F,U+1FA70-1FA7C,U+1FA80-1FA89,U+1FA8F-1FAC6,U+1FACE-1FADC,U+1FADF-1FAE9,U+1FAF0-1FAF8,U+1FB00-1FBFF;
+}
+@font-face {
+  font-family: 'Noto Sans Symbols';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("http://ORIGIN/vendor/fonts/noto-sans-symbols/noto-sans-symbols-symbols-400-normal.woff2") format("woff2");
+  unicode-range: U+0001-000C,U+000E-001F,U+007F-009F,U+20DD-20E0,U+20E2-20E4,U+2150-218F,U+2190,U+2192,U+2194-2199,U+21AF,U+21E6-21F0,U+21F3,U+2218-2219,U+2299,U+22C4-22C6,U+2300-243F,U+2440-244A,U+2460-24FF,U+25A0-27BF,U+2800-28FF,U+2921-2922,U+2981,U+29BF,U+29EB,U+2B00-2BFF,U+4DC0-4DFF,U+FFF9-FFFB,U+10140-1018E,U+10190-1019C,U+101A0,U+101D0-101FD,U+102E0-102FB,U+10E60-10E7E,U+1D2C0-1D2D3,U+1D2E0-1D37F,U+1F000-1F0FF,U+1F100-1F1AD,U+1F1E6-1F1FF,U+1F30D-1F30F,U+1F315,U+1F31C,U+1F31E,U+1F320-1F32C,U+1F336,U+1F378,U+1F37D,U+1F382,U+1F393-1F39F,U+1F3A7-1F3A8,U+1F3AC-1F3AF,U+1F3C2,U+1F3C4-1F3C6,U+1F3CA-1F3CE,U+1F3D4-1F3E0,U+1F3ED,U+1F3F1-1F3F3,U+1F3F5-1F3F7,U+1F408,U+1F415,U+1F41F,U+1F426,U+1F43F,U+1F441-1F442,U+1F444,U+1F446-1F449,U+1F44C-1F44E,U+1F453,U+1F46A,U+1F47D,U+1F4A3,U+1F4B0,U+1F4B3,U+1F4B9,U+1F4BB,U+1F4BF,U+1F4C8-1F4CB,U+1F4D6,U+1F4DA,U+1F4DF,U+1F4E3-1F4E6,U+1F4EA-1F4ED,U+1F4F7,U+1F4F9-1F4FB,U+1F4FD-1F4FE,U+1F503,U+1F507-1F50B,U+1F50D,U+1F512-1F513,U+1F53E-1F54A,U+1F54F-1F5FA,U+1F610,U+1F650-1F67F,U+1F687,U+1F68D,U+1F691,U+1F694,U+1F698,U+1F6AD,U+1F6B2,U+1F6B9-1F6BA,U+1F6BC,U+1F6C6-1F6CF,U+1F6D3-1F6D7,U+1F6E0-1F6EA,U+1F6F0-1F6F3,U+1F6F7-1F6FC,U+1F700-1F7FF,U+1F800-1F80B,U+1F810-1F847,U+1F850-1F859,U+1F860-1F887,U+1F890-1F8AD,U+1F8B0-1F8BB,U+1F8C0-1F8C1,U+1F900-1F90B,U+1F93B,U+1F946,U+1F984,U+1F996,U+1F9E9,U+1FA00-1FA6F,U+1FA70-1FA7C,U+1FA80-1FA89,U+1FA8F-1FAC6,U+1FACE-1FADC,U+1FADF-1FAE9,U+1FAF0-1FAF8,U+1FB00-1FBFF;
+}
+
+/* highlight.js theme, embedded inline for offline / future-proof export */
+
+
+
+.template-unbranded {
+  font-weight: 400;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+.template-unbranded h1 {
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.template-unbranded h4,
+.template-unbranded h5,
+.template-unbranded h6 {
+  font-size: 1em;
+  font-weight: 600;
+}
+.template-unbranded strong { font-weight: 700; }
+.template-unbranded em { font-style: italic; }
+.template-unbranded table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.template-unbranded table th {
+  padding: 10px 14px;
+  text-align: left;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.template-unbranded table td {
+  padding: 10px 14px;
+  vertical-align: top;
+}
+.template-unbranded code {
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.template-unbranded pre {
+  padding: 1.1em 1.4em;
+  overflow-x: auto;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.template-unbranded pre code {
+  background: none;
+  padding: 0;
+}
+/* The browser's own style gives these "monospace", a system font: print them in the vendored code font. */
+.template-unbranded kbd,
+.template-unbranded samp,
+.template-unbranded tt {
+  font-family: 'Source Code Pro', 'Source Code Pro Symbols', 'Noto Sans Symbols 2', 'Noto Sans Symbols', monospace;
+}
+
+.template-unbranded pre {
+  position: relative;
+  line-height: 1.5;
+  tab-size: 4;
+  -moz-tab-size: 4;
+}
+.template-unbranded pre code.hljs {
+  display: block;
+  padding: 0;
+  color: inherit;
+  background: none;
+  --bd-code-add: rgba(46, 160, 67, 0.08);
+  --bd-code-del: rgba(207, 34, 46, 0.08);
+}
+/* The language label: small, quiet, top right, inside the block. Generated
+   content, so Word and PowerPoint export (which read the code text) never see it. */
+.template-unbranded pre[data-lang] {
+  --bd-lang: #9aa0a6;
+  padding-top: 30px;
+}
+.template-unbranded pre[data-lang]::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 9px;
+  right: 14px;
+  padding-left: 12px;
+  font-family: 'Inter', 'Montserrat', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #5f6872;
+  background: radial-gradient(circle at 4px 50%, var(--bd-lang) 3.2px, transparent 3.8px) no-repeat;
+}
+.template-unbranded pre[data-lang-id="php"] { --bd-lang: #777bb4; }
+.template-unbranded pre[data-lang-id="javascript"] { --bd-lang: #f1e05a; }
+.template-unbranded pre[data-lang-id="typescript"] { --bd-lang: #3178c6; }
+.template-unbranded pre[data-lang-id="json"] { --bd-lang: #cbcb41; }
+.template-unbranded pre[data-lang-id="jsonc"] { --bd-lang: #cbcb41; }
+.template-unbranded pre[data-lang-id="json5"] { --bd-lang: #cbcb41; }
+.template-unbranded pre[data-lang-id="yaml"] { --bd-lang: #cb171e; }
+.template-unbranded pre[data-lang-id="html"] { --bd-lang: #e34c26; }
+.template-unbranded pre[data-lang-id="xml"] { --bd-lang: #3f8fd2; }
+.template-unbranded pre[data-lang-id="vue"] { --bd-lang: #41b883; }
+.template-unbranded pre[data-lang-id="svelte"] { --bd-lang: #ff3e00; }
+.template-unbranded pre[data-lang-id="twig"] { --bd-lang: #bacf29; }
+.template-unbranded pre[data-lang-id="blade"] { --bd-lang: #f7523f; }
+.template-unbranded pre[data-lang-id="css"] { --bd-lang: #8a5cd0; }
+.template-unbranded pre[data-lang-id="scss"] { --bd-lang: #c6538c; }
+.template-unbranded pre[data-lang-id="less"] { --bd-lang: #4d7ab8; }
+.template-unbranded pre[data-lang-id="sql"] { --bd-lang: #e38c00; }
+.template-unbranded pre[data-lang-id="bash"] { --bd-lang: #89e051; }
+.template-unbranded pre[data-lang-id="shell"] { --bd-lang: #89e051; }
+.template-unbranded pre[data-lang-id="console"] { --bd-lang: #89e051; }
+.template-unbranded pre[data-lang-id="powershell"] { --bd-lang: #5391fe; }
+.template-unbranded pre[data-lang-id="python"] { --bd-lang: #3572a5; }
+.template-unbranded pre[data-lang-id="pycon"] { --bd-lang: #3572a5; }
+.template-unbranded pre[data-lang-id="dockerfile"] { --bd-lang: #2496ed; }
+.template-unbranded pre[data-lang-id="nginx"] { --bd-lang: #009639; }
+.template-unbranded pre[data-lang-id="apache"] { --bd-lang: #d22128; }
+.template-unbranded pre[data-lang-id="terraform"] { --bd-lang: #7b42bc; }
+.template-unbranded pre[data-lang-id="hcl"] { --bd-lang: #7b42bc; }
+.template-unbranded pre[data-lang-id="diff"] { --bd-lang: #8a94a6; }
+.template-unbranded pre[data-lang-id="markdown"] { --bd-lang: #519aba; }
+.template-unbranded pre[data-lang-id="ini"] { --bd-lang: #a0aab4; }
+.template-unbranded pre[data-lang-id="toml"] { --bd-lang: #c0713e; }
+.template-unbranded pre[data-lang-id="env"] { --bd-lang: #ecd53f; }
+.template-unbranded pre[data-lang-id="properties"] { --bd-lang: #2a6ebb; }
+.template-unbranded pre[data-lang-id="http"] { --bd-lang: #3b8eea; }
+.template-unbranded pre[data-lang-id="graphql"] { --bd-lang: #e10098; }
+.template-unbranded pre[data-lang-id="go"] { --bd-lang: #00add8; }
+.template-unbranded pre[data-lang-id="rust"] { --bd-lang: #dea584; }
+.template-unbranded pre[data-lang-id="java"] { --bd-lang: #b07219; }
+.template-unbranded pre[data-lang-id="kotlin"] { --bd-lang: #a97bff; }
+.template-unbranded pre[data-lang-id="csharp"] { --bd-lang: #4caf50; }
+.template-unbranded pre[data-lang-id="c"] { --bd-lang: #8a8f98; }
+.template-unbranded pre[data-lang-id="cpp"] { --bd-lang: #f34b7d; }
+.template-unbranded pre[data-lang-id="ruby"] { --bd-lang: #cc342d; }
+.template-unbranded pre[data-lang-id="swift"] { --bd-lang: #f05138; }
+.template-unbranded pre[data-lang-id="lua"] { --bd-lang: #5a6fd6; }
+.template-unbranded pre[data-lang-id="perl"] { --bd-lang: #39a7c9; }
+.template-unbranded pre[data-lang-id="makefile"] { --bd-lang: #427819; }
+.template-unbranded pre[data-lang-id="text"] { --bd-lang: #9aa0a6; }
+.template-unbranded .hljs-punctuation,
+.template-unbranded .hljs-tag { color: #4b5563; }
+.template-unbranded .hljs-keyword,
+.template-unbranded .hljs-template-tag,
+.template-unbranded .hljs-meta .hljs-keyword { color: #a626a4; }
+.template-unbranded .hljs-doctag,
+.template-unbranded .hljs-emphasis { color: #a626a4; font-style: italic; }
+.template-unbranded .hljs-type,
+.template-unbranded .hljs-title.class_,
+.template-unbranded .hljs-class .hljs-title,
+.template-unbranded .hljs-title.class_.inherited__ { color: #866300; }
+.template-unbranded .hljs-title,
+.template-unbranded .hljs-title.function_,
+.template-unbranded .hljs-function .hljs-title,
+.template-unbranded .hljs-selector-id { color: #2f5bd2; }
+.template-unbranded .hljs-link { color: #2f5bd2; text-decoration: underline; }
+.template-unbranded .hljs-built_in,
+.template-unbranded .hljs-selector-pseudo { color: #0b6f8a; }
+.template-unbranded .hljs-operator,
+.template-unbranded .hljs-regexp,
+.template-unbranded .hljs-char.escape_ { color: #0b6f8a; }
+.template-unbranded .hljs-variable,
+.template-unbranded .hljs-template-variable,
+.template-unbranded .hljs-property,
+.template-unbranded .hljs-attr,
+.template-unbranded .hljs-attribute,
+.template-unbranded .hljs-subst { color: #c22f3a; }
+.template-unbranded .hljs-variable.language_ { color: #c22f3a; font-style: italic; }
+.template-unbranded .hljs-params { color: inherit; }
+.template-unbranded .hljs-number,
+.template-unbranded .hljs-literal,
+.template-unbranded .hljs-variable.constant_,
+.template-unbranded .hljs-symbol,
+.template-unbranded .hljs-bullet,
+.template-unbranded .hljs-selector-class,
+.template-unbranded .hljs-selector-attr,
+.template-unbranded .hljs-tag .hljs-attr { color: #b04e0f; }
+.template-unbranded .hljs-strong { color: #b04e0f; font-weight: 700; }
+.template-unbranded .hljs-string,
+.template-unbranded .hljs-meta .hljs-string,
+.template-unbranded .hljs-char,
+.template-unbranded .hljs-code,
+.template-unbranded .hljs-formula { color: #3b7a26; }
+.template-unbranded .hljs-comment,
+.template-unbranded .hljs-quote { color: #6b7280; font-style: italic; }
+.template-unbranded .hljs-comment .hljs-doctag { color: #a626a4; font-style: italic; }
+.template-unbranded .hljs-meta,
+.template-unbranded .hljs-meta.prompt_ { color: #b32d6e; }
+.template-unbranded .hljs-name,
+.template-unbranded .hljs-selector-tag { color: #c22f3a; }
+.template-unbranded .hljs-section { color: #c22f3a; font-weight: 700; }
+.template-unbranded .language-csharp .hljs-title { color: #866300; }
+.template-unbranded .language-csharp .hljs-function .hljs-title { color: #2f5bd2; }
+.template-unbranded .hljs-addition { color: #3b7a26; background: var(--bd-code-add); }
+.template-unbranded .hljs-deletion { color: #c22f3a; background: var(--bd-code-del); }
+
+.template-unbranded a { text-decoration: none; }
+.template-unbranded hr { border: none; }
+.template-unbranded img {
+  max-width: 100%;
+  height: auto;
+}
+.template-unbranded .cover-page {
+  min-height: 257mm;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  box-sizing: border-box;
+  page-break-after: always;
+  break-after: page;
+}
+@media print {
+  .template-unbranded .cover-page {
+    min-height: var(--bd-page-height, 297mm);
+    page-break-after: always;
+    break-after: page;
+  }
+  /* Print quality (README, Print quality). A heading never ends a page; a
+     paragraph or list item never leaves fewer than three lines on either side
+     of a break; table rows, figures and images stay whole, and a table that
+     runs on repeats its header row; an image is never taller than the text
+     column (--bd-page-content-height, js/print-document.js) and keeps its
+     shape; a long address in running text wraps instead of reaching the margin. */
+  .template-unbranded h1,
+  .template-unbranded h2,
+  .template-unbranded h3,
+  .template-unbranded h4,
+  .template-unbranded h5,
+  .template-unbranded h6 {
+    page-break-after: avoid;
+    break-after: avoid;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .template-unbranded p,
+  .template-unbranded li,
+  .template-unbranded dd,
+  .template-unbranded dt,
+  .template-unbranded blockquote {
+    orphans: 3;
+    widows: 3;
+  }
+  .template-unbranded tr,
+  .template-unbranded figure,
+  .template-unbranded img,
+  .template-unbranded svg {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  /* Definition lists from Markdown (a Term line, then ": definition" lines): the term in bold and kept with its
+     first definition, the definitions indented. Only a dl with no class, which is what Markdown produces: the
+     templates' own cover lists (a dl with a class) keep their styles. */
+  .template-unbranded dl:not([class]) > dt {
+    font-weight: 700;
+    margin: 0.7em 0 0.15em;
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+  .template-unbranded dl:not([class]) > dd {
+    margin: 0 0 0.4em 1.5em;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  /* Footnotes (js/markdown.js): the notes are a smaller numbered list after a rule; the numbers in the text and the
+     way back are links with no underline. */
+  .template-unbranded sup.footnote-ref a,
+  .template-unbranded a.footnote-back { text-decoration: none; }
+  .template-unbranded section.footnotes {
+    margin-top: 2em;
+    font-size: 0.85em;
+  }
+  .template-unbranded section.footnotes hr { margin: 0 0 0.6em; }
+  .template-unbranded section.footnotes ol {
+    margin: 0;
+    padding-left: 1.6em;
+  }
+  .template-unbranded section.footnotes li { margin: 0 0 0.3em; }
+  .template-unbranded thead { display: table-header-group; }
+  .template-unbranded tfoot { display: table-footer-group; }
+  .template-unbranded img,
+  .template-unbranded svg,
+  .template-unbranded video,
+  .template-unbranded canvas {
+    max-width: 100%;
+    max-height: calc(var(--bd-page-content-height, 257mm) - 12mm);
+    object-fit: contain;
+  }
+  .template-unbranded a { overflow-wrap: anywhere; }
+  .template-unbranded td a,
+  .template-unbranded th a { overflow-wrap: break-word; }
+  .template-unbranded table { page-break-inside: avoid; }
+  /* A block of up to 25 lines stays on one page; a longer one (class
+     bd-code-long, js/code-languages.js) may break, but never leaves its label
+     and first lines alone at the foot of a page. */
+  .template-unbranded pre:not(.bd-code-long) {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .template-unbranded pre.bd-code-long {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* A PDF cannot scroll: long code lines, URLs and hashes wrap instead of being
+     cut off at the page edge. The on-screen preview keeps its horizontal scroll.
+     break-word (inherited by text, inline code and table cells) never narrows a
+     table column below its longest word; long tokens in cells get <wbr> break
+     opportunities from js/print-document.js. "anywhere" only where a block is
+     already full width and cannot be squeezed: code blocks. */
+  .template-unbranded { overflow-wrap: break-word; }
+  .template-unbranded pre {
+    overflow: visible;
+    white-space: pre-wrap;
+  }
+  .template-unbranded pre code {
+    white-space: pre-wrap;
+  }
+  .template-unbranded pre,
+  .template-unbranded pre code { overflow-wrap: anywhere; }
+}
+
+.template-unbranded {
+  /* ── Neutral tokens ── */
+  --ub-ink:     #1c1c1c;
+  --ub-soft:    #3a3a3a;
+  --ub-bg:      #ffffff;
+  --ub-surface: #fafaf7;
+  --ub-border:  #d8d4cc;
+  --ub-rule:    #2a2a2a;
+  --ub-muted:   #7a7670;
+  --ub-serif:   'Source Serif Pro', 'Source Code Pro Symbols', 'Noto Sans Symbols 2', 'Noto Sans Symbols',Georgia, 'Times New Roman', serif;
+  --ub-sans:    'Inter', 'Source Code Pro Symbols', 'Noto Sans Symbols 2', 'Noto Sans Symbols','Helvetica Neue', Arial, sans-serif;
+  --ub-mono:    'Source Code Pro', 'Noto Sans Symbols 2', 'Noto Sans Symbols','Cascadia Code', 'Fira Code', Consolas, monospace;
+
+  background: var(--ub-bg);
+  color: var(--ub-ink);
+  font-family: var(--ub-serif);
+  font-size: 16.5px;
+  line-height: 1.7;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Headings ── */
+.template-unbranded h1 {
+  font-family: var(--ub-sans);
+  font-size: 2.4em;
+  font-weight: 700;
+  color: var(--ub-ink);
+  margin: 0 0 0.7em;
+  padding-bottom: 0.45em;
+  border-bottom: 2px solid var(--ub-rule);
+}
+
+.template-unbranded h2 {
+  font-family: var(--ub-sans);
+  font-size: 1.55em;
+  font-weight: 600;
+  color: var(--ub-ink);
+  letter-spacing: -0.01em;
+  margin: 2em 0 0.55em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--ub-border);
+}
+
+.template-unbranded h3 {
+  font-family: var(--ub-sans);
+  font-size: 1.2em;
+  font-weight: 600;
+  color: var(--ub-ink);
+  margin: 1.7em 0 0.45em;
+}
+
+.template-unbranded h4,
+.template-unbranded h5,
+.template-unbranded h6 {
+  font-family: var(--ub-sans);
+  color: var(--ub-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 1.5em 0 0.4em;
+}
+
+/* ── Body ── */
+.template-unbranded p {
+  margin: 0 0 1.1em;
+  hyphens: auto;
+}
+.template-unbranded p + p {
+  text-indent: 0;
+}
+.template-unbranded strong { color: var(--ub-ink); }
+
+/* ── Lists ── */
+.template-unbranded ul,
+.template-unbranded ol {
+  padding-left: 1.5em;
+  margin: 0.8em 0 1.2em;
+}
+.template-unbranded li {
+  margin: 0.35em 0;
+  padding-left: 0.3em;
+}
+.template-unbranded ul > li::marker {
+  color: var(--ub-muted);
+}
+.template-unbranded ol > li::marker {
+  color: var(--ub-muted);
+  font-weight: 600;
+}
+
+/* ── Blockquote ── */
+.template-unbranded blockquote {
+  font-family: var(--ub-serif);
+  font-style: italic;
+  font-size: 1.08em;
+  color: var(--ub-soft);
+  border-left: 3px solid var(--ub-rule);
+  padding: 0.3em 1.4em;
+  margin: 1.6em 0.5em;
+  line-height: 1.65;
+}
+.template-unbranded blockquote p { margin: 0.5em 0; }
+.template-unbranded blockquote p:first-child::before {
+  content: '\201C';
+  font-size: 1.6em;
+  line-height: 0;
+  vertical-align: -0.35em;
+  margin-right: 0.1em;
+  color: var(--ub-muted);
+}
+
+/* ── Table ── */
+.template-unbranded table {
+  margin: 1.6em 0;
+  font-family: var(--ub-sans);
+  font-size: 14.5px;
+}
+.template-unbranded table th {
+  background: transparent;
+  color: var(--ub-ink);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-top: 2px solid var(--ub-rule);
+  border-bottom: 1px solid var(--ub-rule);
+}
+.template-unbranded table td {
+  border-bottom: 1px solid var(--ub-border);
+}
+.template-unbranded table tr:last-child td {
+  border-bottom: 2px solid var(--ub-rule);
+}
+
+/* ── Code ── */
+.template-unbranded code {
+  background: var(--ub-surface);
+  color: var(--ub-ink);
+  font-family: var(--ub-mono);
+  font-size: 0.86em;
+  border: 1px solid var(--ub-border);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.template-unbranded pre {
+  background: var(--ub-surface);
+  color: var(--ub-ink);
+  border-radius: 4px;
+  border: 1px solid var(--ub-border);
+  border-left: 3px solid var(--ub-rule);
+  margin: 1.5em 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.template-unbranded pre code {
+  border: none;
+  font-size: 1em;
+}
+
+/* ── Links ── */
+.template-unbranded a {
+  color: var(--ub-ink);
+  border-bottom: 1px solid var(--ub-muted);
+  padding-bottom: 1px;
+}
+.template-unbranded a:hover {
+  border-bottom-color: var(--ub-ink);
+}
+
+/* ── HR ── */
+.template-unbranded hr {
+  text-align: center;
+  margin: 2.4em 0;
+  line-height: 1;
+  height: 1em;
+}
+.template-unbranded hr::before {
+  content: '\2756\00a0\00a0\2756\00a0\00a0\2756';
+  color: var(--ub-muted);
+  font-size: 0.9em;
+  letter-spacing: 0.3em;
+}
+
+/* ── Images ── */
+.template-unbranded img {
+  display: block;
+  margin: 1.5em auto;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   COVER PAGE: classic, centred, typographic
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.template-unbranded .cover-page {
+  padding: 72px 80px;
+  position: relative;
+}
+
+.template-unbranded .cover-page::before,
+.template-unbranded .cover-page::after {
+  content: '';
+  position: absolute;
+  left: 80px;
+  right: 80px;
+  height: 1px;
+  background: var(--ub-rule);
+}
+.template-unbranded .cover-page::before { top: 72px; }
+.template-unbranded .cover-page::after  { bottom: 72px; }
+
+.template-unbranded .cover-page .cover-top {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 2em 0;
+}
+
+.template-unbranded .cover-page .cover-label {
+  font-family: var(--ub-sans);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.32em;
+  color: var(--ub-muted);
+  margin-bottom: 2.2em;
+}
+
+.template-unbranded .cover-page .cover-title {
+  font-family: var(--ub-serif);
+  font-size: 3em;
+  font-weight: 700;
+  color: var(--ub-ink);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin: 0;
+  max-width: 90%;
+}
+
+.template-unbranded .cover-page .cover-rule {
+  width: 48px;
+  height: 2px;
+  background: var(--ub-rule);
+  margin: 2em auto;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.template-unbranded .cover-page .cover-meta {
+  font-family: var(--ub-sans);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ub-soft);
+  line-height: 2;
+  letter-spacing: 0.02em;
+}
+.template-unbranded .cover-page .cover-meta .cover-author {
+  font-weight: 500;
+  color: var(--ub-ink);
+}
+
+.template-unbranded .cover-page .cover-bottom {
+  font-family: var(--ub-sans);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+  color: var(--ub-muted);
+  text-align: center;
+}
+
+/* ── Print body rules ── */
+@media print {
+  .template-unbranded blockquote { page-break-inside: avoid; }
+}
+
+
+    /* ── Resets ── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    html, body { margin: 0; padding: 0; }
+
+    /* ── Screen: A4 page-card preview, matches .preview-page in app.css ── */
+    @media screen {
+      body {
+        background: #b0b4b8;
+        padding: 24px;
+      }
+      .bd-page {
+        background: #fff;
+        width: 794px;
+        margin: 0 auto 20px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.22);
+        padding: 60px;
+      }
+      .bd-page-cover {
+        padding: 0;
+        overflow: hidden;
+      }
+    }
+
+    /* ── Print ── */
+    @media print {
+      body { background: #fff; }
+      .bd-page { box-shadow: none; padding: 0; width: auto; }
+
+      @page { size: A4 portrait; margin: 22mm; }
+@page :first { margin: 0; }
+:root { --bd-page-width: 210mm; --bd-page-height: 297mm; --bd-page-content-height: calc(297mm - 2 * 22mm); }
+    }
+  </style>
+</head>
+<body>
+<div class="bd-page bd-page-cover"><div class="template-unbranded" style="max-width:none;width:100%;margin:0;padding:0;"><div class="cover-page">
+      <div class="cover-top">
+        <div class="cover-label">Document</div>
+        <div class="cover-title">Markdown Showcase</div>
+        <div class="cover-rule"></div>
+        <div class="cover-meta">
+          
+          <div>15 January 2026</div>
+        </div>
+      </div>
+      <div class="cover-bottom">❖ ❖ ❖</div>
+    </div></div></div>
+<div class="bd-page">
+  <div class="template-unbranded">
+<h1 id="markdown-showcase">Markdown Showcase</h1>
+<p>A comprehensive reference document covering every element Markdown supports.</p>
+<hr>
+<h2 id="table-of-contents">Table of Contents</h2>
+<ul>
+<li><a href="#headings">Headings</a></li>
+<li><a href="#paragraphs--line-breaks">Paragraphs &amp; Line Breaks</a></li>
+<li><a href="#emphasis">Emphasis</a></li>
+<li><a href="#blockquotes">Blockquotes</a></li>
+<li><a href="#lists">Lists</a></li>
+<li><a href="#code">Code</a></li>
+<li><a href="#horizontal-rules">Horizontal Rules</a></li>
+<li><a href="#h-links">Links</a></li>
+<li><a href="#h-images">Images</a></li>
+<li><a href="#tables">Tables</a></li>
+<li><a href="#task-lists">Task Lists</a></li>
+<li><a href="#footnotes">Footnotes</a></li>
+<li><a href="#definition-lists">Definition Lists</a></li>
+<li><a href="#strikethrough--highlight">Strikethrough &amp; Highlight</a></li>
+<li><a href="#subscript--superscript">Subscript &amp; Superscript</a></li>
+<li><a href="#emoji">Emoji</a></li>
+<li><a href="#escaping-characters">Escaping Characters</a></li>
+<li><a href="#html-inline">HTML Inline</a></li>
+</ul>
+<hr>
+<h2 id="headings">Headings</h2>
+<h1 id="heading-1">Heading 1</h1>
+<h2 id="heading-2">Heading 2</h2>
+<h3 id="heading-3">Heading 3</h3>
+<h4 id="heading-4">Heading 4</h4>
+<h5 id="heading-5">Heading 5</h5>
+<h6 id="heading-6">Heading 6</h6>
+<h1 id="alternate-h1-setext-style">Alternate H1 (Setext style)</h1>
+<h2 id="alternate-h2-setext-style">Alternate H2 (Setext style)</h2>
+<hr>
+<h2 id="paragraphs--line-breaks">Paragraphs &amp; Line Breaks</h2>
+<p>This is a paragraph. Paragraphs are separated by a blank line.
+Adjacent lines with no blank line between them are joined into the same paragraph. They do not produce a line break.</p>
+<p>This is a second paragraph. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut
+labore et dolore magna aliqua.</p>
+<p>To force a line break within a paragraph, end a line with two or more spaces<br>then continue on the next line. That produces a <code>&lt;br&gt;</code>.</p>
+<hr>
+<h2 id="emphasis">Emphasis</h2>
+<p><strong>Bold</strong> text using double asterisks.</p>
+<p><strong>Bold</strong> text using double underscores.</p>
+<p><em>Italic</em> text using single asterisk.</p>
+<p><em>Italic</em> text using single underscore.</p>
+<p><em><strong>Bold and italic</strong></em> using triple asterisks.</p>
+<p><em><strong>Bold and italic</strong></em> using triple underscores.</p>
+<p><strong>Bold with <em>nested italic</em> inside.</strong></p>
+<p><em>Italic with <strong>nested bold</strong> inside.</em></p>
+<hr>
+<h2 id="blockquotes">Blockquotes</h2>
+<blockquote>
+<p>A simple single-line blockquote.</p>
+</blockquote>
+<blockquote>
+<p>A blockquote that spans
+multiple lines in the source
+but renders as one block.</p>
+</blockquote>
+<blockquote>
+<p><strong>Blockquote with formatting.</strong>
+You can use <em>italic</em>, <strong>bold</strong>, and <code>code</code> inside a blockquote.</p>
+</blockquote>
+<blockquote>
+<p>Nested blockquotes:</p>
+<blockquote>
+<p>This is a nested blockquote inside the first.</p>
+<blockquote>
+<p>And one level deeper still.</p>
+</blockquote>
+</blockquote>
+</blockquote>
+<blockquote>
+<h4 id="blockquote-with-a-heading">Blockquote with a heading</h4>
+<ul>
+<li>Lists work inside blockquotes too.</li>
+<li>Item two.</li>
+</ul>
+<p>The blockquote ends after the blank line.</p>
+</blockquote>
+<hr>
+<h2 id="lists">Lists</h2>
+<h3 id="unordered-lists">Unordered Lists</h3>
+<ul>
+<li>Item one</li>
+<li>Item two</li>
+<li>Item three</li>
+</ul>
+<ul>
+<li>Asterisk bullet one</li>
+<li>Asterisk bullet two</li>
+</ul>
+<ul>
+<li>Plus bullet one</li>
+<li>Plus bullet two</li>
+</ul>
+<p><strong>Nested unordered list:</strong></p>
+<ul>
+<li>Level one<ul>
+<li>Level two<ul>
+<li>Level three<ul>
+<li>Level four</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>Back to two</li>
+</ul>
+</li>
+<li>Back to one</li>
+</ul>
+<h3 id="ordered-lists">Ordered Lists</h3>
+<ol>
+<li>First item</li>
+<li>Second item</li>
+<li>Third item</li>
+</ol>
+<p><strong>Ordered list with arbitrary numbers (still renders correctly):</strong></p>
+<ol>
+<li>First</li>
+<li>Second</li>
+<li>Third</li>
+</ol>
+<p><strong>Ordered list starting at a different number:</strong></p>
+<ol start="5">
+<li>Fifth</li>
+<li>Sixth</li>
+<li>Seventh</li>
+</ol>
+<p><strong>Nested ordered list:</strong></p>
+<ol>
+<li>First item<ol>
+<li>Sub-item A</li>
+<li>Sub-item B<ol>
+<li>Sub-sub-item i</li>
+<li>Sub-sub-item ii</li>
+</ol>
+</li>
+</ol>
+</li>
+<li>Second item</li>
+<li>Third item</li>
+</ol>
+<p><strong>Mixed nested lists:</strong></p>
+<ol>
+<li>Ordered top level<ul>
+<li>Unordered nested</li>
+<li>Another unordered nested<ol>
+<li>Back to ordered at depth three</li>
+<li>Item two</li>
+</ol>
+</li>
+</ul>
+</li>
+<li>Second ordered item</li>
+</ol>
+<p><strong>Loose list</strong> (paragraphs inside each item):</p>
+<ul>
+<li><p>This item has a paragraph.</p>
+<p>The paragraph continues here inside the same list item.</p>
+</li>
+<li><p>This item is also loose.</p>
+<p>It also has a paragraph inside.</p>
+</li>
+</ul>
+<hr>
+<h2 id="code">Code</h2>
+<h3 id="inline-code">Inline Code</h3>
+<p>Use <code>backticks</code> for inline code. For example: <code>const x = 42;</code> or <code>npm install</code>.</p>
+<p>To include a backtick inside inline code, use double backticks: <code>`backtick`</code>.</p>
+<h3 id="fenced-code-blocks">Fenced Code Blocks</h3>
+<pre><code class="hljs language-plaintext">Plain fenced block with no language specified.</code></pre><pre data-lang="JavaScript" data-lang-id="javascript"><code class="hljs language-javascript"><span class="hljs-comment">// JavaScript</span>
+<span class="hljs-keyword">const</span> <span class="hljs-title function_">greet</span> = (<span class="hljs-params">name</span>) =&gt; {
+    <span class="hljs-keyword">return</span> <span class="hljs-string">`Hello, <span class="hljs-subst">${name}</span>!`</span>;
+};
+
+<span class="hljs-keyword">async</span> <span class="hljs-keyword">function</span> <span class="hljs-title function_">fetchData</span>(<span class="hljs-params">url</span>) {
+    <span class="hljs-keyword">const</span> response = <span class="hljs-keyword">await</span> <span class="hljs-title function_">fetch</span>(url);
+    <span class="hljs-keyword">const</span> data = <span class="hljs-keyword">await</span> response.<span class="hljs-title function_">json</span>();
+    <span class="hljs-keyword">return</span> data;
+}
+
+<span class="hljs-variable language_">console</span>.<span class="hljs-title function_">log</span>(<span class="hljs-title function_">greet</span>(<span class="hljs-string">'PrintMD'</span>));</code></pre><pre data-lang="Python" data-lang-id="python"><code class="hljs language-python"><span class="hljs-comment"># Python</span>
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">fibonacci</span>(<span class="hljs-params">n</span>):
+    <span class="hljs-keyword">if</span> n &lt;= <span class="hljs-number">1</span>:
+        <span class="hljs-keyword">return</span> n
+    a, b = <span class="hljs-number">0</span>, <span class="hljs-number">1</span>
+    <span class="hljs-keyword">for</span> _ <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(<span class="hljs-number">2</span>, n + <span class="hljs-number">1</span>):
+        a, b = b, a + b
+    <span class="hljs-keyword">return</span> b
+
+<span class="hljs-built_in">print</span>([fibonacci(i) <span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(<span class="hljs-number">10</span>)])</code></pre><pre data-lang="SQL" data-lang-id="sql"><code class="hljs language-sql"><span class="hljs-comment">-- SQL</span>
+<span class="hljs-keyword">SELECT</span> u.id,
+       u.name,
+       <span class="hljs-built_in">COUNT</span>(p.id)       <span class="hljs-keyword">AS</span> post_count,
+       <span class="hljs-built_in">MAX</span>(p.created_at) <span class="hljs-keyword">AS</span> last_post
+<span class="hljs-keyword">FROM</span> users u
+         <span class="hljs-keyword">LEFT</span> <span class="hljs-keyword">JOIN</span> posts p <span class="hljs-keyword">ON</span> p.user_id <span class="hljs-operator">=</span> u.id
+<span class="hljs-keyword">WHERE</span> u.created_at <span class="hljs-operator">&gt;=</span> NOW() <span class="hljs-operator">-</span> <span class="hljs-type">INTERVAL</span> <span class="hljs-string">'90 days'</span>
+<span class="hljs-keyword">GROUP</span> <span class="hljs-keyword">BY</span> u.id, u.name
+<span class="hljs-keyword">ORDER</span> <span class="hljs-keyword">BY</span> post_count <span class="hljs-keyword">DESC</span>
+    LIMIT <span class="hljs-number">20</span>;</code></pre><pre data-lang="Bash" data-lang-id="bash"><code class="hljs language-bash"><span class="hljs-comment"># Bash</span>
+<span class="hljs-comment">#!/usr/bin/env bash</span>
+<span class="hljs-built_in">set</span> -euo pipefail
+
+<span class="hljs-keyword">for</span> file <span class="hljs-keyword">in</span> *.md; <span class="hljs-keyword">do</span>
+  <span class="hljs-built_in">echo</span> <span class="hljs-string">"Processing: <span class="hljs-variable">$file</span>"</span>
+  pandoc <span class="hljs-string">"<span class="hljs-variable">$file</span>"</span> -o <span class="hljs-string">"<span class="hljs-variable">${file%.md}</span>.pdf"</span>
+<span class="hljs-keyword">done</span></code></pre><pre data-lang="CSS" data-lang-id="css"><code class="hljs language-css"><span class="hljs-comment">/* CSS */</span>
+<span class="hljs-selector-pseudo">:root</span> {
+    <span class="hljs-attr">--primary</span>: <span class="hljs-number">#1e3a5f</span>;
+    <span class="hljs-attr">--accent</span>: <span class="hljs-number">#fd6f2f</span>;
+}
+
+<span class="hljs-selector-class">.card</span> {
+    <span class="hljs-attribute">display</span>: flex;
+    <span class="hljs-attribute">flex-direction</span>: column;
+    <span class="hljs-attribute">gap</span>: <span class="hljs-number">1rem</span>;
+    <span class="hljs-attribute">padding</span>: <span class="hljs-number">1.5rem</span>;
+    <span class="hljs-attribute">border-radius</span>: <span class="hljs-number">8px</span>;
+    <span class="hljs-attribute">box-shadow</span>: <span class="hljs-number">0</span> <span class="hljs-number">2px</span> <span class="hljs-number">8px</span> <span class="hljs-built_in">rgba</span>(<span class="hljs-number">0</span>, <span class="hljs-number">0</span>, <span class="hljs-number">0</span>, <span class="hljs-number">0.12</span>);
+}</code></pre><pre data-lang="JSON" data-lang-id="json"><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">"name"</span><span class="hljs-punctuation">:</span> <span class="hljs-string">"printmd"</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">"version"</span><span class="hljs-punctuation">:</span> <span class="hljs-string">"1.0.0"</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">"scripts"</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">"start"</span><span class="hljs-punctuation">:</span> <span class="hljs-string">"serve ."</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">"test"</span><span class="hljs-punctuation">:</span> <span class="hljs-string">"vitest"</span>
+  <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">"dependencies"</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">"marked"</span><span class="hljs-punctuation">:</span> <span class="hljs-string">"^9.0.0"</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">"dompurify"</span><span class="hljs-punctuation">:</span> <span class="hljs-string">"^3.0.0"</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre><pre data-lang="TypeScript" data-lang-id="typescript"><code class="hljs language-typescript"><span class="hljs-comment">// TypeScript</span>
+<span class="hljs-keyword">interface</span> <span class="hljs-title class_">Document</span> {
+    <span class="hljs-attr">id</span>: <span class="hljs-built_in">string</span>;
+    <span class="hljs-attr">title</span>: <span class="hljs-built_in">string</span>;
+    author?: <span class="hljs-built_in">string</span>;
+    <span class="hljs-attr">createdAt</span>: <span class="hljs-title class_">Date</span>;
+    <span class="hljs-attr">tags</span>: <span class="hljs-built_in">string</span>[];
+}
+
+<span class="hljs-keyword">function</span> <span class="hljs-title function_">renderDoc</span>(<span class="hljs-params">doc: <span class="hljs-type">Document</span></span>): <span class="hljs-built_in">string</span> {
+    <span class="hljs-keyword">return</span> <span class="hljs-string">`# <span class="hljs-subst">${doc.title}</span>\n\nAuthor: <span class="hljs-subst">${doc.author ?? <span class="hljs-string">'Unknown'</span>}</span>`</span>;
+}</code></pre><pre class="bd-code-long" data-lang="PHP" data-lang-id="php"><code class="hljs language-php"><span class="hljs-meta">&lt;?php</span>
+<span class="hljs-comment">// PHP</span>
+
+<span class="hljs-keyword">declare</span>(strict_types=<span class="hljs-number">1</span>);
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ArticleRepository</span>
+</span>{
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>(<span class="hljs-params"><span class="hljs-keyword">private</span> <span class="hljs-keyword">readonly</span> PDO <span class="hljs-variable">$db</span></span>) </span>{}
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">findPublished</span>(<span class="hljs-params"><span class="hljs-keyword">int</span> <span class="hljs-variable">$limit</span> = <span class="hljs-number">20</span></span>): <span class="hljs-title">array</span>
+    </span>{
+        <span class="hljs-variable">$stmt</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">prepare</span>(
+            <span class="hljs-string">'SELECT id, title, slug, published_at
+             FROM articles
+             WHERE status = :status
+             ORDER BY published_at DESC
+             LIMIT :limit'</span>
+        );
+        <span class="hljs-variable">$stmt</span>-&gt;<span class="hljs-title function_ invoke__">execute</span>([<span class="hljs-string">':status'</span> =&gt; <span class="hljs-string">'published'</span>, <span class="hljs-string">':limit'</span> =&gt; <span class="hljs-variable">$limit</span>]);
+        <span class="hljs-keyword">return</span> <span class="hljs-variable">$stmt</span>-&gt;<span class="hljs-title function_ invoke__">fetchAll</span>(PDO::<span class="hljs-variable constant_">FETCH_ASSOC</span>);
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">findBySlug</span>(<span class="hljs-params"><span class="hljs-keyword">string</span> <span class="hljs-variable">$slug</span></span>): ?<span class="hljs-title">array</span>
+    </span>{
+        <span class="hljs-variable">$stmt</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">prepare</span>(
+            <span class="hljs-string">'SELECT * FROM articles WHERE slug = :slug LIMIT 1'</span>
+        );
+        <span class="hljs-variable">$stmt</span>-&gt;<span class="hljs-title function_ invoke__">execute</span>([<span class="hljs-string">':slug'</span> =&gt; <span class="hljs-variable">$slug</span>]);
+        <span class="hljs-variable">$row</span> = <span class="hljs-variable">$stmt</span>-&gt;<span class="hljs-title function_ invoke__">fetch</span>(PDO::<span class="hljs-variable constant_">FETCH_ASSOC</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-variable">$row</span> ?: <span class="hljs-literal">null</span>;
+    }
+}
+
+<span class="hljs-comment">// Usage</span>
+<span class="hljs-variable">$repo</span> = <span class="hljs-keyword">new</span> <span class="hljs-title class_">ArticleRepository</span>(<span class="hljs-variable">$pdo</span>);
+<span class="hljs-variable">$articles</span> = <span class="hljs-variable">$repo</span>-&gt;<span class="hljs-title function_ invoke__">findPublished</span>(<span class="hljs-attr">limit</span>: <span class="hljs-number">10</span>);
+
+<span class="hljs-keyword">foreach</span> (<span class="hljs-variable">$articles</span> <span class="hljs-keyword">as</span> <span class="hljs-variable">$article</span>) {
+    <span class="hljs-keyword">echo</span> <span class="hljs-title function_ invoke__">sprintf</span>(<span class="hljs-string">"[%s] %s\n"</span>, <span class="hljs-variable">$article</span>[<span class="hljs-string">'published_at'</span>], <span class="hljs-variable">$article</span>[<span class="hljs-string">'title'</span>]);
+}</code></pre><h3 id="indented-code-block-4-spaces">Indented Code Block (4 spaces)</h3>
+<pre><code class="hljs language-plaintext">This is an indented code block.
+It works with 4 leading spaces.
+No syntax highlighting.</code></pre><hr>
+<h2 id="horizontal-rules">Horizontal Rules</h2>
+<p>Three or more hyphens:</p>
+<hr>
+<p>Three or more asterisks:</p>
+<hr>
+<p>Three or more underscores:</p>
+<hr>
+<hr>
+<h2 id="h-links">Links</h2>
+<h3 id="inline-links">Inline Links</h3>
+<p><a href="https://example.com" rel="noopener noreferrer" target="_blank">Basic link</a></p>
+<p><a href="https://example.com" title="Visit Example" rel="noopener noreferrer" target="_blank">Link with title</a></p>
+<p><a href="./other-file.md" rel="noopener noreferrer" target="_blank">Relative link</a></p>
+<h3 id="reference-style-links">Reference-Style Links</h3>
+<p><a href="https://example.com" title="Example Site" rel="noopener noreferrer" target="_blank">Reference link</a></p>
+<p><a href="https://example.org" title="Example Org" rel="noopener noreferrer" target="_blank">Another reference</a></p>
+<h3 id="autolinks">Autolinks</h3>
+<p><a href="https://example.com" rel="noopener noreferrer" target="_blank">https://example.com</a></p>
+<p><a href="mailto:hello@example.com" rel="noopener noreferrer" target="_blank">hello@example.com</a></p>
+<h3 id="bare-url-gfm">Bare URL (GFM)</h3>
+<p><a href="https://example.com" rel="noopener noreferrer" target="_blank">https://example.com</a></p>
+<hr>
+<h2 id="h-images">Images</h2>
+<h3 id="inline-image">Inline Image</h3>
+<p><img src="https://picsum.photos/seed/printmd/800/300" alt="A forest path with sunlight filtering through the trees" title="Sample landscape photo from picsum.photos"></p>
+<h3 id="image-with-reference-style">Image with Reference Style</h3>
+<p><img src="https://picsum.photos/seed/lake/800/250" alt="A calm mountain lake at dawn"></p>
+<h3 id="linked-image">Linked Image</h3>
+<p><a href="https://example.com" rel="noopener noreferrer" target="_blank"><img src="https://picsum.photos/seed/flow/400/180" alt="A close-up of a journalist's notebook and pen"></a></p>
+<hr>
+<h2 id="tables">Tables</h2>
+<h3 id="basic-table">Basic Table</h3>
+<table>
+<thead>
+<tr>
+<th>Column One</th>
+<th>Column Two</th>
+<th>Column Three</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Row 1, A</td>
+<td>Row 1, B</td>
+<td>Row 1, C</td>
+</tr>
+<tr>
+<td>Row 2, A</td>
+<td>Row 2, B</td>
+<td>Row 2, C</td>
+</tr>
+<tr>
+<td>Row 3, A</td>
+<td>Row 3, B</td>
+<td>Row 3, C</td>
+</tr>
+</tbody></table>
+<h3 id="alignment">Alignment</h3>
+<table>
+<thead>
+<tr>
+<th align="left">Left-aligned</th>
+<th align="center">Centre-aligned</th>
+<th align="right">Right-aligned</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left">Apple</td>
+<td align="center">Banana</td>
+<td align="right">Cherry</td>
+</tr>
+<tr>
+<td align="left">One</td>
+<td align="center">Two</td>
+<td align="right">Three</td>
+</tr>
+<tr>
+<td align="left"><code>code</code></td>
+<td align="center"><strong>bold</strong></td>
+<td align="right"><em>ital</em></td>
+</tr>
+</tbody></table>
+<h3 id="wide-table">Wide Table</h3>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Role</th>
+<th>Department</th>
+<th>Start Date</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Alice Johnson</td>
+<td>Lead Developer</td>
+<td>Engineering</td>
+<td>2021-03-01</td>
+<td>Active</td>
+</tr>
+<tr>
+<td>Bob Chen</td>
+<td>Product Manager</td>
+<td>Product</td>
+<td>2020-07-15</td>
+<td>Active</td>
+</tr>
+<tr>
+<td>Carol Smith</td>
+<td>UX Designer</td>
+<td>Design</td>
+<td>2022-01-10</td>
+<td>Active</td>
+</tr>
+<tr>
+<td>David Okafor</td>
+<td>Data Analyst</td>
+<td>Analytics</td>
+<td>2021-11-22</td>
+<td>On Leave</td>
+</tr>
+<tr>
+<td>Eve Williams</td>
+<td>DevOps Engineer</td>
+<td>Infrastructure</td>
+<td>2019-05-30</td>
+<td>Active</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="task-lists">Task Lists</h2>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> Completed task</li>
+<li><input checked="" disabled="" type="checkbox"> Another completed task</li>
+<li><input disabled="" type="checkbox"> Incomplete task</li>
+<li><input disabled="" type="checkbox"> Another incomplete task<ul>
+<li><input checked="" disabled="" type="checkbox"> Nested completed sub-task</li>
+<li><input disabled="" type="checkbox"> Nested incomplete sub-task</li>
+</ul>
+</li>
+<li><input checked="" disabled="" type="checkbox"> Final completed item</li>
+</ul>
+<hr>
+<h2 id="footnotes">Footnotes</h2>
+<p>Here is a sentence with a footnote.<sup class="footnote-ref"><a href="#fn-1" id="fnref-1">1</a></sup></p>
+<p>And another sentence with a second footnote.<sup class="footnote-ref"><a href="#fn-2" id="fnref-2">2</a></sup></p>
+<hr>
+<h2 id="definition-lists">Definition Lists</h2>
+<dl><dt>Term One</dt><dd>The definition of term one.</dd><dt>Term Two</dt><dd>The first definition of term two.</dd><dd>A second definition for the same term.</dd><dt>Markdown</dt><dd>A lightweight markup language created by John Gruber in 2004.</dd><dd>Designed to be readable as plain text and convertible to HTML.</dd></dl>
+<hr>
+<h2 id="strikethrough--highlight">Strikethrough &amp; Highlight</h2>
+<p><del>Strikethrough</del> text using double tildes.</p>
+<p>This sentence has <del>deleted words</del> in the middle of it.</p>
+<p><mark>Highlighted text</mark> using double equals (supported in some renderers).</p>
+<hr>
+<h2 id="subscript--superscript">Subscript &amp; Superscript</h2>
+<p>H<sub>2</sub>O (subscript, supported in some renderers)</p>
+<p>E = mc<sup>2</sup> (superscript, supported in some renderers)</p>
+<hr>
+<h2 id="emoji">Emoji</h2>
+<p>😄 🚀 ✅ ⚠️ 📚 💻</p>
+<p>(Emoji shortcodes are supported in some Markdown renderers, including GitHub.)</p>
+<hr>
+<h2 id="escaping-characters">Escaping Characters</h2>
+<p>Use a backslash <code>\</code> to escape Markdown special characters:</p>
+<p>*not italic*</p>
+<p>**not bold**</p>
+<p># not a heading</p>
+<p>- not a list item</p>
+<p>[not a link](<a href="https://example.com" rel="noopener noreferrer" target="_blank">https://example.com</a>)</p>
+<p>`not code`</p>
+<p>Full list of escapable characters: \ ` * _ { } [ ] ( ) # + - . !</p>
+<hr>
+<h2 id="html-inline">HTML Inline</h2>
+<p>Markdown renderers that allow HTML can render inline elements:</p>
+<p>The <abbr title="HyperText Markup Language">HTML</abbr> abbreviation tag.</p>
+<p><kbd>Ctrl</kbd> + <kbd>S</kbd> to save.</p>
+<p><mark>Highlighted with HTML mark tag.</mark></p>
+<p><small>Smaller text using the small tag.</small></p>
+<details>
+<summary>Collapsed section (click to expand)</summary>
+
+<p>This content is hidden until the user expands the <code>&lt;details&gt;</code> block. Useful for long optional content.</p>
+</details>
+
+<hr>
+<h2 id="combining-elements">Combining Elements</h2>
+<blockquote>
+<p><strong>Note:</strong> The following examples show elements used together.</p>
+</blockquote>
+<h3 id="blockquote-with-a-list-inside">Blockquote with a list inside</h3>
+<blockquote>
+<p>Here are the key points:</p>
+<ol>
+<li>First important point</li>
+<li>Second important point<blockquote>
+</blockquote>
+</li>
+</ol>
+</blockquote>
+<ul>
+<li>Sub-detail A</li>
+</ul>
+<blockquote>
+<ul>
+<li>Sub-detail B</li>
+</ul>
+<ol start="3">
+<li>Third important point</li>
+</ol>
+</blockquote>
+<h3 id="table-with-inline-formatting">Table with inline formatting</h3>
+<table>
+<thead>
+<tr>
+<th align="left">Feature</th>
+<th align="left">Status</th>
+<th align="left">Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><strong>Bold</strong></td>
+<td align="left">✅ Done</td>
+<td align="left">Works in all renderers</td>
+</tr>
+<tr>
+<td align="left"><em>Italic</em></td>
+<td align="left">✅ Done</td>
+<td align="left">Works in all renderers</td>
+</tr>
+<tr>
+<td align="left"><del>Strike</del></td>
+<td align="left">✅ Done</td>
+<td align="left">GFM only</td>
+</tr>
+<tr>
+<td align="left"><code>Inline code</code></td>
+<td align="left">✅ Done</td>
+<td align="left">Works in all renderers</td>
+</tr>
+<tr>
+<td align="left"><a href="/" rel="noopener noreferrer" target="_blank">Link</a></td>
+<td align="left">✅ Done</td>
+<td align="left">Relative or absolute</td>
+</tr>
+</tbody></table>
+<h3 id="code-block-inside-a-list">Code block inside a list</h3>
+<ol>
+<li><p>Install dependencies:</p>
+<pre data-lang="Bash" data-lang-id="bash"><code class="hljs language-bash">npm install</code></pre></li>
+<li><p>Start the development server:</p>
+<pre data-lang="Bash" data-lang-id="bash"><code class="hljs language-bash">npm run dev</code></pre></li>
+<li><p>Open <code>http://localhost:3000</code> in your browser.</p>
+</li>
+</ol>
+<hr>
+<p><em>End of Markdown Showcase. This document covers headings, paragraphs, emphasis, blockquotes, lists (ordered, unordered,
+nested, loose, mixed), code (inline and fenced with 10+ languages), horizontal rules, links (inline, reference,
+autolink), images, tables (basic, aligned, wide), task lists, footnotes, definition lists, strikethrough, highlight,
+subscript, superscript, emoji, character escaping, inline HTML, and combination examples.</em></p>
+<section class="footnotes"><hr><ol><li id="fn-1">This is the first footnote text. <a href="#fnref-1" class="footnote-back" aria-label="Back to the text">↑</a></li><li id="fn-2">This is a named footnote. Footnotes can contain <strong>bold</strong>, <em>italic</em>, and <code>code</code>. <a href="#fnref-2" class="footnote-back" aria-label="Back to the text">↑</a></li></ol></section>
+
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Print fixture</title>
+</head>
+<body>
+<!--
+  Builds the print document (the HTML the PDF export prints) for a fixture with
+  very long lines, for the template named in ?template=. tests/print-pdf.mjs
+  reads window.__print = {html, lines}, writes the HTML into this page, prints it
+  to PDF and checks every line is in the PDF's text.
+-->
+<script src="../../vendor/marked/marked.min.js"></script>
+<script src="../../vendor/dompurify/purify.min.js"></script>
+<script src="../../vendor/highlightjs/highlight.min.js"></script>
+<script src="../../vendor/highlightjs/languages.min.js"></script>
+<script type="module">
+    import {prepareExport} from '../../js/export-pipeline.js';
+    import {buildPrintDocument} from '../../js/print-document.js';
+    import {configureMarked} from '../../js/markdown.js';
+    import {getTemplateById, getTemplates} from '../../js/templates.js';
+
+    configureMarked();
+    const id = new URLSearchParams(location.search).get('template') || getTemplates()[0].manifest.id;
+    const tpl = getTemplateById(id);
+
+    // A 300-character code line: the start of a real fetch call, then words.
+    let code = "const response = await fetch('http://127.0.0.1:8787/api/v1/render?template=example-co', {";
+    for (let i = 1; code.length < 290; i++) code += ` part${i}`;
+    code = (code + ' // END-OF-CODE-LINE').slice(0, 300);
+    const lines = {
+        code,
+        inline: 'inline' + 'abcdefghij'.repeat(15) + 'END',
+        url: 'https://example.com/' + 'segment'.repeat(25) + '/END-OF-URL',
+        hash: '0123456789abcdef'.repeat(10) + 'ENDHASH',
+        cell: 'cell' + 'fedcba9876543210'.repeat(10) + 'ENDCELL',
+    };
+    const md = [
+        '# Wrap check',
+        '',
+        '```js',
+        lines.code,
+        '```',
+        '',
+        `Inline code: \`${lines.inline}\` and more text.`,
+        '',
+        `A link: <${lines.url}>`,
+        '',
+        `A hash: ${lines.hash}`,
+        '',
+        '| Key | Value |',
+        '|-----|-------|',
+        `| id | ${lines.cell} |`,
+        '',
+        // An ordinary table with one long column: its short columns must keep their words whole.
+        '| Component | Responsibility | Implementation | Description |',
+        '|-----------|----------------|----------------|-------------|',
+        '| Renderer | Internationalisation | Implementation | A long description that keeps going for a while so that'
+            + ' the column has much more content than the others and the table must share out the width between all four'
+            + ' columns in the automatic layout algorithm. |',
+        '| Exporter | Accessibility | Configuration | Another long description that keeps going for a while so that'
+            + ' the column has much more content than the others and the table has to wrap. |',
+        '',
+    ].join('\n');
+    // Words that must print unbroken (each inside a narrow table column).
+    const words = ['Component', 'Responsibility', 'Implementation', 'Internationalisation', 'Accessibility', 'Configuration'];
+
+    // ?layout=continuous: one continuous page (README, Export: Page options), with a block far wider than
+    // the page (Chromium shrinks such a print) and a last line to find; tests/print-pdf.mjs runs the
+    // print window's layout step (js/page-layout.js) before it prints.
+    const continuous = new URLSearchParams(location.search).get('layout') === 'continuous';
+    const wide = new URLSearchParams(location.search).get('wide') !== '0';
+    const source = continuous
+        ? md + (wide ? '\n<div style="width: 3000px">A block of HTML wider than one and a half pages.</div>\n\n' : '\n\n')
+            + Array.from({length: 30}, (_, i) => `Paragraph ${i + 1} of ordinary text for the continuous page.`).join('\n\n')
+            + '\n\nEND-OF-DOCUMENT\n'
+        : md;
+    const p = prepareExport(source, tpl, {date: new Date(2026, 0, 15), pageSize: 'A4', orientation: 'portrait',
+        ...(continuous ? {layout: 'continuous'} : {})});
+    const html = buildPrintDocument({
+        title: p.doc.title, templateId: tpl.manifest.id, templateCSS: tpl.styles, hljsCSS: '',
+        bodyHTML: p.bodyHTML, coverHTML: p.coverHTML, pageOpts: p.pageOpts,
+    });
+    window.__print = {html, lines, words, pageOpts: p.pageOpts};
+</script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Folder Defaults Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>folder-defaults.js and folder-defaults-dialog.js: the stored defaults (real, storable handles from the origin private file system) and the Load dialog</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+
+<div aria-modal="true" class="app-modal" hidden id="defaults-modal" role="dialog">
+    <div class="app-modal-panel">
+        <p data-role="message"></p>
+        <ul data-role="list"></ul>
+        <button data-role="cancel" type="button">Cancel</button>
+        <button data-role="open" type="button">Open folders</button>
+    </div>
+</div>
+
+<script type="module">
+    import * as fd from '../js/folder-defaults.js';
+    import * as dlg from '../js/folder-defaults-dialog.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('FOLDERDEFAULTS');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    function deleteDb() {
+        return new Promise((resolve) => {
+            const req = indexedDB.deleteDatabase(fd.DB_NAME);
+            req.onsuccess = req.onerror = () => resolve();
+            req.onblocked = () => setTimeout(resolve, 200);
+        });
+    }
+
+    async function opfsDir(name) {
+        const root = await navigator.storage.getDirectory();
+        return {root, dir: await root.getDirectoryHandle(name, {create: true})};
+    }
+
+    h.test('the stored defaults keep real directory handles through a new connection, and clear forgets them', async () => {
+        await deleteDb();
+        const stamp = Date.now();
+        const a = await opfsDir('printmd-defaults-a-' + stamp);
+        const b = await opfsDir('printmd-defaults-b-' + stamp);
+        try {
+            let st = fd.createDefaultsStore();
+            assert(await st.get() === null, 'nothing stored at first');
+            await st.set({version: 1, savedAt: 1, folders: [{name: a.dir.name, handle: a.dir}, {name: b.dir.name, handle: b.dir}], openFile: null});
+            st.close();
+            st = fd.createDefaultsStore();   // as after a restart: a new connection
+            const v = await st.get();
+            assert(v && v.folders.length === 2 && fd.hasFolders(v), JSON.stringify(v && v.folders.map((f) => f.name)));
+            assert(v.folders[0].handle.kind === 'directory' && await v.folders[0].handle.isSameEntry(a.dir), 'the first handle is the same folder');
+            assert(await v.folders[1].handle.isSameEntry(b.dir), 'the second handle is the same folder');
+            assert(await v.folders[0].handle.queryPermission({mode: 'read'}) === 'granted', 'readable');
+            await st.clear();
+            assert(await st.get() === null, 'cleared');
+            st.close();
+        } finally {
+            await a.root.removeEntry(a.dir.name, {recursive: true}).catch(() => {});
+            await b.root.removeEntry(b.dir.name, {recursive: true}).catch(() => {});
+            await deleteDb();
+        }
+    });
+
+    h.test('a site data clear (the database deleted under it) leaves get() answering null', async () => {
+        await deleteDb();
+        const st = fd.createDefaultsStore();
+        await st.set({version: 1, folders: [{name: 'x', handle: null}]});
+        await deleteDb();   // closes the open connection through versionchange
+        assert(await st.get() === null, 'empty after the wipe');
+        st.close();
+        await deleteDb();
+    });
+
+    h.test('the Load dialog: one Choose button per folder, a different name is warned about, Open gives the chosen ones in order', async () => {
+        const root = document.getElementById('defaults-modal');
+        const picks = [{kind: 'directory', name: 'book'}, {kind: 'directory', name: 'Drafts'}];
+        const show = dlg.createDefaultsDialog(root, {pick: async () => picks.shift() || null});
+        const done = show([{name: 'book'}, {name: 'notes'}, {name: 'spare'}]);
+        assert(!root.hidden, 'shown');
+        const rows = [...root.querySelectorAll('.defaults-row')];
+        assert(rows.length === 3, 'three rows');
+        assert(rows[1].querySelector('.defaults-choose').getAttribute('aria-label') === 'Choose folder notes', 'labelled with the expected name');
+        assert(document.activeElement === rows[0].querySelector('.defaults-choose'), 'focus on the first Choose');
+        const openBtn = root.querySelector('[data-role="open"]');
+        assert(openBtn.disabled, 'Open waits for a folder');
+        rows[0].querySelector('.defaults-choose').click();
+        await sleep(0);
+        assert(rows[0].querySelector('.defaults-status').textContent === 'Chosen' && !rows[0].classList.contains('defaults-mismatch'), 'same name');
+        rows[1].querySelector('.defaults-choose').click();
+        await sleep(0);
+        assert(rows[1].classList.contains('defaults-mismatch') && rows[1].querySelector('.defaults-status').textContent === 'Chosen "Drafts", not "notes"',
+            rows[1].querySelector('.defaults-status').textContent);
+        rows[2].querySelector('.defaults-choose').click();   // the picker is cancelled
+        await sleep(0);
+        assert(rows[2].querySelector('.defaults-status').textContent === 'Not chosen', 'a cancelled pick leaves the row');
+        assert(!openBtn.disabled && openBtn.textContent === 'Open 2 folders', openBtn.textContent);
+        openBtn.click();
+        const out = await done;
+        assert(root.hidden, 'closed');
+        assert(JSON.stringify(out.map((x) => x.name + '=' + x.handle.name)) === '["book=book","notes=Drafts"]', JSON.stringify(out.map((x) => x.name + '=' + x.handle.name)));
+    });
+
+    h.test('the Load dialog: Cancel and Escape give null; names are text, not markup', async () => {
+        const root = document.getElementById('defaults-modal');
+        const show = dlg.createDefaultsDialog(root, {pick: async () => ({kind: 'directory', name: 'x'})});
+        let done = show([{name: '<img src=x onerror=alert(1)>'}]);
+        assert(!root.querySelector('img') && root.querySelector('.defaults-name').textContent === '<img src=x onerror=alert(1)>', 'shown as text');
+        root.querySelector('[data-role="cancel"]').click();
+        assert(await done === null, 'Cancel');
+        done = show([{name: 'a'}]);
+        document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+        assert(await done === null && root.hidden, 'Escape');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

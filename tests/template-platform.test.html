@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Template platform Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        iframe { width: 1px; height: 1px; border: 0; position: absolute; left: -10px; }
+    </style>
+</head>
+<body>
+<h1>Template platform in the editor: the fixture template's picker group, cover subject, page sizes, page colour and fonts</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<!--
+  The whole editor, booted in tests/lib/platform-frame.html with the test-only fixture
+  (tests/fixtures/platform-fixture/template.js) registered through one more layer
+  manifest. The pure parts are in tests/template-platform.test.mjs; the PDFs it prints
+  through the API in server/test/template-platform.test.mjs.
+-->
+<script type="module">
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('PLATFORM');
+    const ID = 'platform-fixture';
+    const NEW_FAMILIES = ['Figtree', 'Fraunces', 'Schibsted Grotesk', 'Plus Jakarta Sans', 'IBM Plex Sans', 'DM Sans', 'Lora',
+        'Libre Caslon Text'];
+    const cspOf = async (path) => new DOMParser().parseFromString(await (await fetch(path)).text(), 'text/html')
+        .querySelector('meta[http-equiv="Content-Security-Policy"]')?.content;
+
+    /** The frame's report, once. */
+    const report = new Promise((resolve) => {
+        const onMessage = (ev) => {
+            if (ev.origin !== location.origin || !ev.data || ev.data.frame !== 'platform') return;
+            window.removeEventListener('message', onMessage);
+            resolve(ev.data);
+        };
+        window.addEventListener('message', onMessage);
+        const frame = document.createElement('iframe');
+        frame.title = 'editor with the fixture template';
+        frame.src = 'lib/platform-frame.html';
+        document.body.appendChild(frame);
+    });
+
+    h.test('the frame runs under the app\'s own Content-Security-Policy', async () => {
+        const app = await cspOf('../index.html');
+        assert(app && app.includes("script-src 'self'"), 'the app has a policy');
+        assert(await cspOf('lib/platform-frame.html') === app, 'tests/lib/platform-frame.html has the same policy as index.html');
+    });
+
+    h.test('the editor boots with the fixture: no error, no policy violation', async () => {
+        const r = await report;
+        assert(!r.error, 'booted: ' + r.error);
+        assert(r.errors.length === 0, 'no console error: ' + r.errors);
+        assert(r.violations.length === 0, 'no policy violation: ' + r.violations);
+    });
+
+    h.test('picker: templates under their group headings A to Z, the fixture under its own', async () => {
+        const r = await report;
+        assert(r.looseOptions === 0, 'every option is under a heading once a group exists');
+        const labels = r.groups.map((g) => g.label);
+        const core = await (await fetch('../templates/manifest.core.json')).json();
+        const grouped = core.templates.every((t) => t.group);
+        if (grouped) {
+            // The real manifests give every template a group ("Current", "New"), so no "Other" heading.
+            assert(labels[0] === 'Current' && !labels.includes('Other'), 'headings A to Z: ' + labels);
+            assert(JSON.stringify(labels) === JSON.stringify([...labels].sort((a, b) => a.localeCompare(b, 'en'))), 'headings are alphabetical: ' + labels);
+            assert(labels.indexOf('Test') === labels.length - 1, 'the fixture heading comes last alphabetically: ' + labels);
+        } else {
+            // An edition whose templates have no group (the public one): they sit under "Other", which is always last.
+            assert(JSON.stringify(labels) === JSON.stringify(['Test', 'Other']), 'headings: ' + labels);
+        }
+        const fixtureIds = r.groups[labels.indexOf('Test')].ids;
+        const registryIds = r.groups[grouped ? 0 : labels.indexOf('Other')].ids;
+        assert(JSON.stringify(fixtureIds) === JSON.stringify([ID]), 'the fixture under Test: ' + fixtureIds);
+        assert(registryIds.length >= 1 && !registryIds.includes(ID), 'the registry templates under ' + (grouped ? 'Current' : 'Other') + ': ' + registryIds);
+    });
+
+    h.test('fonts: none of the new families is fetched at boot; the fixture\'s load once it is applied', async () => {
+        const r = await report;
+        assert(r.startTemplate !== ID, 'booted on a registry template');
+        assert(r.fetchedAtBoot.length === 0, 'nothing fetched at boot: ' + r.fetchedAtBoot);
+        assert(NEW_FAMILIES.every((f) => r.fontsReady.includes(f)), 'loaded after applying: ' + r.fontsReady);
+    });
+
+    h.test('cover: the subject from the front matter; the page cards take the template\'s page colour', async () => {
+        const r = await report;
+        assert(r.subject === 'The subject line on the cover', 'subject: ' + r.subject);
+        assert(r.cardBackground === 'rgb(29, 24, 21)', 'page colour: ' + r.cardBackground);
+    });
+
+    h.test('Size: only the template\'s sizes; Slide fixes the orientation to landscape and the preview to 16:9', async () => {
+        const r = await report;
+        assert(r.slideHiddenAtBoot, 'Slide is not offered by a template without it');
+        // Custom size is offered with every template (README, Export: Page options).
+        assert(JSON.stringify(r.offered) === JSON.stringify(['A4', 'Letter', 'Slide', 'Custom']), 'the fixture offers its sizes: ' + r.offered);
+        assert(r.slide.paper === 'Slide' && r.slide.orientation === 'landscape' && r.slide.orientationDisabled, JSON.stringify(r.slide));
+        assert(r.slide.landscape && Math.abs(Number(r.slide.aspect) - 142.9 / 254) < 0.001, 'preview aspect: ' + r.slide.aspect);
+        assert(r.back.paper === 'A4' && r.back.orientation === 'portrait' && !r.back.orientationDisabled && r.back.slideHidden,
+            'back on a template without Slide: ' + JSON.stringify(r.back));
+    });
+
+    h.test('default page: choosing a template that names one sets Size and Page; a later choice stands', async () => {
+        const r = await report;
+        if (!r.chosen) return;  // no template in this edition names a default page
+        assert(r.chosen.paper === 'Slide' && r.chosen.orientation === 'landscape', 'chosen: ' + JSON.stringify(r.chosen));
+        assert(r.chosenA4.paper === 'A4' && r.chosenA4.orientation === 'landscape', 'A4 chosen after: ' + JSON.stringify(r.chosenA4));
+        assert(r.afterwards.paper === 'A4' && r.afterwards.orientation === 'landscape',
+            'a template without a default keeps the choice: ' + JSON.stringify(r.afterwards));
+    });
+
+    h.test('palette and template information: the group in the command, the manifest entry\'s description', async () => {
+        const r = await report;
+        assert(r.paletteLabels.includes('Template: Platform fixture (Test)'), 'palette: ' + r.paletteLabels);
+        assert(r.groups.every((g) => r.paletteLabels.filter((l) => l.endsWith(`(${g.label})`)).length === g.ids.length),
+            'the others name their heading: ' + r.paletteLabels);
+        assert(r.infoDescription === 'The fixture, as its manifest entry describes it', 'info: ' + r.infoDescription);
+    });
+
+    h.run();
+</script>
+</body>
+</html>

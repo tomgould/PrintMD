@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Heading id Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        #app { width: 1400px; height: 900px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>Heading ids must not hijack the app's element references</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<iframe id="app" title="app under test"></iframe>
+<script type="module">
+    import {createHarness, assert, resetStorage} from './lib/harness.js';
+
+    const h = createHarness('HEADINGIDS');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const frame = document.getElementById('app');
+
+    // Each heading's slug equals the id of an element the app uses.
+    const HOSTILE_IDS = ['editor', 'preview', 'sidebar', 'main', 'preview-pane', 'doc-list', 'toast',
+        'template-info-popover', 'template-info-body', 'template-info-close', 'btn-template-info',
+        'drive-modal', 'drive-tab-url', 'drive-tab-settings', 'drive-input-client-id', 'drive-input-api-key',
+        'drive-url-input', 'storage-banner', 'cmdk', 'cmdk-input', 'cmdk-list', 'export-format'];
+    const HOSTILE_DOC = '# Hostile headings\n\n[to editor](#editor)\n\n## control heading\n\nbody\n\n' +
+        HOSTILE_IDS.map(id => `## ${id}\n\nbody of ${id}\n`).join('\n');
+
+    let win, doc;
+
+    /** The app's own element with this id (never one inside the rendered preview). */
+    function real(id) {
+        return [...doc.querySelectorAll(`[id="${id}"]`)].find(el => !el.closest('#preview-pane .preview-page'));
+    }
+    /** The heading whose text is this app id: rendered with the h- prefix (js/markdown.js appSafeId). */
+    function heading(id) {
+        return doc.querySelector(`#preview-pane .preview-page h2[id="h-${id}"]`);
+    }
+
+    async function waitFor(fn, what, ms = 6000) {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+            try { if (fn()) return; } catch (_e) { /* not ready */ }
+            await sleep(50);
+        }
+        throw new Error('timed out waiting for ' + what);
+    }
+
+    h.test('boot the app and render a document whose headings reuse app ids', async () => {
+        await resetStorage();
+        localStorage.setItem('gd-client-id', 'dummy-client-for-test.apps.googleusercontent.com');
+        frame.src = '../index.html';
+        await new Promise(res => frame.addEventListener('load', res, {once: true}));
+        win = frame.contentWindow;
+        doc = frame.contentDocument;
+        await waitFor(() => win.__bd && win.__bd.docManager.currentId != null, 'app boot');
+        const editor = real('editor');
+        editor.value = HOSTILE_DOC;
+        editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+        await waitFor(() => HOSTILE_IDS.every(id => heading(id)), 'hostile headings rendered');
+    });
+
+    h.test('the editor is read-only until the first document has loaded, then editable', async () => {
+        // Text typed while storage is still opening would be overwritten by the
+        // document init loads, so the page starts with the editor read-only.
+        const page = new DOMParser().parseFromString(await (await fetch('../index.html')).text(), 'text/html');
+        assert(page.getElementById('editor').hasAttribute('readonly'), 'index.html starts the editor read-only');
+        await waitFor(() => !real('editor').readOnly, 'editor editable after boot');
+        assert(win.__bd.docManager.currentId != null, 'a document is loaded');
+    });
+
+    h.test('headings "editor", "preview", "sidebar" leave the app elements in charge', async () => {
+        assert(real('editor').tagName === 'TEXTAREA', 'editor is the textarea');
+        real('sidebar-toggle').click();
+        assert(real('sidebar').classList.contains('collapsed'), 'real sidebar collapsed');
+        assert(!heading('sidebar').classList.contains('collapsed'), 'heading untouched');
+        real('sidebar-toggle').click();
+        assert(!real('sidebar').classList.contains('collapsed'), 'real sidebar expanded again');
+        assert(real('preview').contains(heading('preview')), 'preview still renders into #preview');
+    });
+
+    h.test('template info opens the real popover, not the heading', async () => {
+        real('btn-template-info').click();
+        await sleep(50);
+        assert(!real('template-info-popover').hidden, 'real popover shown');
+        assert(real('template-info-body').querySelector('h3'), 'real popover body filled');
+        assert(heading('template-info-body').textContent === 'template-info-body', 'heading text intact');
+        real('template-info-close').click();
+        assert(real('template-info-popover').hidden, 'real popover closed by its close button');
+    });
+
+    h.test('Drive dialog fills the real credential input and switches the real tabs', async () => {
+        real('btn-import-drive').click();
+        await sleep(80);
+        assert(real('drive-modal').style.display === 'block', 'real modal open');
+        assert(real('drive-input-client-id').value === 'dummy-client-for-test.apps.googleusercontent.com', 'real client id input prefilled');
+        doc.querySelector('#drive-modal .drive-tab[data-tab="settings"]').click();
+        assert(real('drive-tab-settings').style.display === 'block', 'real settings tab shown');
+        assert(heading('drive-tab-settings').style.display === '', 'heading not restyled');
+        real('drive-modal-close').click();
+        assert(real('drive-modal').style.display === 'none', 'real modal closed');
+    });
+
+    h.test('a toast does not remove a heading with id "toast"', async () => {
+        real('btn-copy-html').click();
+        await sleep(200);
+        assert(heading('toast'), 'heading "toast" still in the preview');
+    });
+
+    h.test('no id is used twice in the app page', async () => {
+        const counts = new Map();
+        for (const el of doc.querySelectorAll('[id]')) counts.set(el.id, (counts.get(el.id) || 0) + 1);
+        const dupes = [...counts].filter(([, n]) => n > 1).map(([id]) => id);
+        assert(dupes.length === 0, 'duplicate ids: ' + dupes.join(', '));
+    });
+
+    h.test('headings named after app elements pick up no app CSS', async () => {
+        const control = doc.querySelector('#preview-pane .preview-page h2[id="control-heading"]');
+        assert(control, 'control heading rendered');
+        const props = ['display', 'position', 'font-family', 'font-size', 'font-weight', 'color', 'background-color',
+            'margin-top', 'padding-left', 'padding-top', 'border-right-width', 'overflow-y', 'z-index', 'flex-basis'];
+        const want = win.getComputedStyle(control);
+        const differ = [];
+        for (const id of HOSTILE_IDS) {
+            const got = win.getComputedStyle(heading(id));
+            for (const p of props) {
+                if (got.getPropertyValue(p) !== want.getPropertyValue(p)) differ.push(`${id} ${p}: ${got.getPropertyValue(p)}`);
+            }
+        }
+        assert(differ.length === 0, 'restyled by app CSS: ' + differ.slice(0, 6).join('; '));
+    });
+
+    h.test('a link to #editor scrolls the preview to the "editor" heading', async () => {
+        const link = doc.querySelector('#preview-pane .preview-page a[href="#h-editor"]');
+        assert(link, 'link href follows the prefixed id');
+        // Smooth scrolling inside a nested test iframe is unreliable, so record the
+        // element the app scrolls to rather than measuring the scroll position.
+        const proto = win.Element.prototype;
+        const realScroll = proto.scrollIntoView;
+        let scrolledTo = null;
+        proto.scrollIntoView = function () { scrolledTo = this; };
+        try {
+            link.click();
+        } finally {
+            proto.scrollIntoView = realScroll;
+        }
+        assert(scrolledTo === heading('editor'), 'scrolled to ' + (scrolledTo && (scrolledTo.tagName + '#' + scrolledTo.id)));
+    });
+
+    h.test('a link to a non-ASCII heading scrolls to it; a malformed one does nothing', async () => {
+        const editor = real('editor');
+        editor.value = '# Top\n\n[go](#café-crème) [bad](#%E0%A4%A)\n\n## Café crème\n\ntext\n';
+        editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+        await waitFor(() => [...doc.querySelectorAll('#preview-pane .preview-page h2')].some(el => el.textContent === 'Café crème'), 'heading rendered');
+        const target = doc.querySelector('#preview-pane .preview-page h2');
+        const [go, bad] = doc.querySelectorAll('#preview-pane .preview-page p a');
+        const proto = win.Element.prototype;
+        const realScroll = proto.scrollIntoView;
+        const errors = [];
+        const onError = (e) => errors.push(e.message);
+        win.addEventListener('error', onError);
+        let scrolledTo = null;
+        proto.scrollIntoView = function () { scrolledTo = this; };
+        try {
+            go.click();
+            assert(scrolledTo === target, 'scrolled to ' + (scrolledTo && scrolledTo.id) + ', heading id ' + target.id);
+            scrolledTo = null;
+            bad.click();
+            assert(scrolledTo === null, 'malformed link scrolled somewhere');
+        } finally {
+            proto.scrollIntoView = realScroll;
+            win.removeEventListener('error', onError);
+        }
+        assert(errors.length === 0, 'errors: ' + errors.join('; '));
+    });
+
+    h.test('a raw HTML id is NFC-normalised, so a link written in the other form reaches it', async () => {
+        const editor = real('editor');
+        // The id uses "e" + combining acute (NFD); the link uses the precomposed "é" (NFC).
+        editor.value = '# Top\n\n[go](#café-anchor)\n\n<a id="café-anchor"></a>\n\ntext\n';
+        editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+        const findAnchor = () => [...doc.querySelectorAll('#preview-pane .preview-page a[id]')].find(el => el.id.startsWith('caf'));
+        await waitFor(findAnchor, 'raw anchor rendered');
+        const anchor = findAnchor();
+        assert(anchor.id === 'café-anchor', 'id was not NFC-normalised: ' + JSON.stringify(anchor.id.normalize('NFD')));
+        const go = doc.querySelector('#preview-pane .preview-page p a[href]');
+        const proto = win.Element.prototype;
+        const realScroll = proto.scrollIntoView;
+        let scrolledTo = null;
+        proto.scrollIntoView = function () { scrolledTo = this; };
+        try {
+            go.click();
+        } finally {
+            proto.scrollIntoView = realScroll;
+        }
+        assert(scrolledTo === anchor, 'scrolled to ' + (scrolledTo && (scrolledTo.tagName + '#' + scrolledTo.id)));
+    });
+
+    h.test('anchor links scroll the preview and never navigate the app page', async () => {
+        const before = win.location.href;
+        const editor = real('editor');
+        editor.value = '# Top\n\n[to nowhere](#no-such-heading) [to editor](#editor)\n';
+        editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+        await waitFor(() => doc.querySelector('#preview-pane a[href="#no-such-heading"]'), 'links rendered');
+        doc.querySelector('#preview-pane a[href="#no-such-heading"]').click();
+        doc.querySelector('#preview-pane a[href="#h-editor"]').click();
+        assert(win.location.href === before, 'page URL unchanged: ' + win.location.href);
+    });
+
+    h.test('cleanup', async () => {
+        localStorage.removeItem('gd-client-id');
+        frame.src = 'about:blank';
+        await sleep(100);
+        await resetStorage();
+    });
+
+    h.run();
+</script>
+</body>
+</html>

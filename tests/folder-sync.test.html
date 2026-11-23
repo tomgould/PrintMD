@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Folder Sync Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+    </style>
+</head>
+<body>
+<h1>folder-sync.js + the doc manager's bulk add, update and close</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+
+<script type="module">
+    // Namespace imports: a missing export fails that one test, not the whole page.
+    import * as fs from '../js/folder-sync.js';
+    import * as dm from '../js/docmanager.js';
+    import * as store from '../js/store.js';
+    import {createHarness, assert} from './lib/harness.js';
+
+    const h = createHarness('FOLDERSYNC');
+
+    /** A FileSystemFileHandle stand-in. Change .text and .lastModified to "edit the file". */
+    function fakeFile(name, text, lastModified = 1000) {
+        const fh = {
+            kind: 'file', name, text, lastModified,
+            async getFile() {
+                return {name: fh.name, lastModified: fh.lastModified, async text() { return fh.text; }};
+            },
+            async queryPermission() { return 'granted'; },
+            async requestPermission() { return 'granted'; },
+        };
+        return fh;
+    }
+
+    /** A FileSystemDirectoryHandle stand-in over a plain object of name -> fakeFile | fakeDir. */
+    function fakeDir(name, entries = {}) {
+        const d = {
+            kind: 'directory', name, entries, permission: 'granted', asked: 0,
+            async *values() { for (const e of Object.values(d.entries)) yield e; },
+            async isSameEntry(other) { return other === d; },
+            async queryPermission() { return d.permission; },
+            async requestPermission() { d.asked++; return d.grantOnAsk === false ? d.permission : (d.permission = 'granted'); },
+            add(entry) { d.entries[entry.name] = entry; },
+            remove(entryName) { delete d.entries[entryName]; },
+        };
+        return d;
+    }
+
+    function makeIO(initial = '') {
+        let value = initial;
+        return {
+            getValue: () => value, setValue: (t) => { value = t; },
+            getTemplateId: () => 'unbranded', setTemplateId: () => {},
+        };
+    }
+
+    /** A doc manager on a memory store, a folder sync with manual timers, and what they report. */
+    async function setup({dir, picker = true, checkOpenDoc} = {}) {
+        localStorage.removeItem('printmd-folder-hidden');
+        localStorage.removeItem('printmd-folders');
+        const mem = store.createMemoryStore();
+        const io = makeIO();
+        const manager = dm.createDocManager(io, mem);
+        await manager.init('# Start');
+        const notes = [];
+        const opened = [];
+        const openChecks = [];
+        const timers = {ticks: [], setInterval(f) { this.ticks.push(f); return this.ticks.length; }, clearInterval() {}};
+        const sync = fs.createFolderSync({
+            getDocManager: () => manager,
+            getStore: () => mem,
+            openDoc: async (id) => { opened.push(id); await manager.switchTo(id); },
+            checkOpenDoc: checkOpenDoc || (async () => { openChecks.push(manager.currentId); }),
+            notify: (m, kind) => notes.push([m, kind || 'info']),
+            showDirectoryPicker: picker ? async () => dir : null,
+            timers,
+        });
+        return {mem, io, manager, sync, notes, opened, openChecks, timers};
+    }
+
+    const titlesIn = (sync) => sync.list().map((f) => f.name + ':' + f.docs.map((d) => d.folderPath).join(','));
+
+    function sampleDir() {
+        const sub = fakeDir('chapters', {'two.md': fakeFile('two.md', '# Two')});
+        const hidden = fakeDir('.git', {'x.md': fakeFile('x.md', '# Hidden')});
+        const mods = fakeDir('node_modules', {'readme.md': fakeFile('readme.md', '# Module')});
+        return fakeDir('book', {
+            'one.md': fakeFile('one.md', '# One'),
+            'notes.txt': fakeFile('notes.txt', 'plain'),
+            'b.markdown': fakeFile('b.markdown', '# B'),
+            chapters: sub, '.git': hidden, node_modules: mods,
+        });
+    }
+
+    h.test('isMarkdownName, diffFolder and comparePaths', async () => {
+        assert(fs.isMarkdownName('a.md') && fs.isMarkdownName('B.MARKDOWN') && !fs.isMarkdownName('a.txt') && !fs.isMarkdownName('.hidden.md'), 'names');
+        const d = fs.diffFolder(new Map([['a.md', 1], ['b.md', 2], ['c.md', 3]]), new Map([['a.md', 1], ['b.md', 5], ['d.md', 1]]));
+        assert(JSON.stringify(d) === JSON.stringify({added: ['d.md'], changed: ['b.md'], removed: ['c.md']}), JSON.stringify(d));
+        const sorted = ['z/a.md', 'B.md', 'a.md'].sort(fs.comparePaths);
+        assert(JSON.stringify(sorted) === JSON.stringify(['a.md', 'B.md', 'z/a.md']), JSON.stringify(sorted));
+    });
+
+    h.test('opening a folder stores every Markdown file in it and its subfolders, opens the first and watches', async () => {
+        const dir = sampleDir();
+        const t = await setup({dir});
+        const r = await t.sync.openFolder();
+        assert(r === 'opened', 'result ' + r);
+        assert(JSON.stringify(titlesIn(t.sync)) === JSON.stringify(['book:b.markdown,one.md,chapters/two.md']), JSON.stringify(titlesIn(t.sync)));
+        const first = t.sync.list()[0].docs[0];
+        assert(t.opened[0] === first.id && t.manager.currentId === first.id, 'the first file is open');
+        assert(t.io.getValue() === '# B', 'its text is in the editor');
+        const stored = await t.mem.getDoc(first.id);
+        assert(stored.origin === 'disk' && stored.folderName === 'book' && stored.folderPath === 'b.markdown' && stored.folderHandle === dir, 'folder fields stored');
+        assert(t.sync.watching, 'watching');
+    });
+
+    h.test('a poll adds new files, reloads edited ones and closes removed ones', async () => {
+        const dir = sampleDir();
+        const t = await setup({dir});
+        await t.sync.openFolder();
+        const one = t.sync.list()[0].docs.find((d) => d.folderPath === 'one.md');
+        const two = t.sync.list()[0].docs.find((d) => d.folderPath === 'chapters/two.md');
+        dir.entries['one.md'].text = '# One, edited';
+        dir.entries['one.md'].lastModified = 2000;
+        dir.add(fakeFile('three.md', '# Three'));
+        dir.entries.chapters.remove('two.md');
+        await t.sync.checkAll();
+        assert((await t.mem.getDoc(one.id)).snapshot === '# One, edited', 'edited file reloaded');
+        assert((await t.mem.getDoc(one.id)).title === 'One, edited', 'title follows');
+        assert(!(await t.mem.getDoc(two.id)), 'removed file closed');
+        assert(JSON.stringify(titlesIn(t.sync)) === JSON.stringify(['book:b.markdown,one.md,three.md']), JSON.stringify(titlesIn(t.sync)));
+        const again = await t.sync.checkAll();
+        assert(again === 'done' && t.sync.list()[0].docs.length === 3, 'a second poll changes nothing');
+    });
+
+    h.test('a stored copy with unsaved edits is never overwritten or closed by the folder', async () => {
+        const dir = sampleDir();
+        const t = await setup({dir});
+        await t.sync.openFolder();
+        const one = t.sync.list()[0].docs.find((d) => d.folderPath === 'one.md');
+        // Edit one.md in the app, then leave it.
+        await t.manager.switchTo(one.id);
+        t.io.setValue('# One, my edits');
+        await t.manager.saveCurrent();
+        const b = t.sync.list()[0].docs.find((d) => d.folderPath === 'b.markdown');
+        await t.manager.switchTo(b.id);
+        dir.entries['one.md'].text = '# One, from disk';
+        dir.entries['one.md'].lastModified = 3000;
+        await t.sync.checkAll();
+        assert((await t.mem.getDoc(one.id)).snapshot === '# One, my edits', 'edits kept');
+        dir.remove('one.md');
+        await t.sync.checkAll();
+        assert((await t.mem.getDoc(one.id)).snapshot === '# One, my edits', 'kept when the file is removed');
+        assert(t.notes.some(([m]) => /one\.md was removed from book\. Your unsaved copy is kept\./.test(m)), 'and the user is told');
+    });
+
+    h.test('a change to the open file goes to the open doc\'s own check, not straight into the editor', async () => {
+        const dir = sampleDir();
+        const t = await setup({dir});
+        await t.sync.openFolder();
+        const open = t.manager.currentId;
+        dir.entries['b.markdown'].text = '# B, edited';
+        dir.entries['b.markdown'].lastModified = 4000;
+        await t.sync.checkAll();
+        assert(t.openChecks.length === 1 && t.openChecks[0] === open, 'disk-sync asked to check: ' + JSON.stringify(t.openChecks));
+        assert(t.io.getValue() === '# B', 'the folder did not replace the editor text itself');
+    });
+
+    h.test('removing the open file closes it and opens another doc in its place', async () => {
+        const dir = sampleDir();
+        const t = await setup({dir});
+        await t.sync.openFolder();
+        const open = t.manager.currentId;
+        dir.remove('b.markdown');
+        await t.sync.checkAll();
+        assert(!(await t.mem.getDoc(open)), 'closed');
+        assert(t.manager.currentId && t.manager.currentId !== open, 'another doc is open');
+    });
+
+    h.test('opening the same folder again adds no copies and shows a closed file again', async () => {
+        const dir = sampleDir();
+        const t = await setup({dir});
+        await t.sync.openFolder();
+        const one = t.sync.list()[0].docs.find((d) => d.folderPath === 'one.md');
+        await t.manager.removeDocs([one.id]);
+        t.sync.forgetDocs([one.id], {hide: true});
+        await t.sync.checkAll();
+        assert(!t.sync.list()[0].docs.some((d) => d.folderPath === 'one.md'), 'a closed file stays closed on later polls');
+        const r = await t.sync.openFolder();
+        assert(r === 'refreshed', 'result ' + r);
+        assert(t.sync.list().length === 1, 'one folder');
+        assert(JSON.stringify(titlesIn(t.sync)) === JSON.stringify(['book:b.markdown,one.md,chapters/two.md']), JSON.stringify(titlesIn(t.sync)));
+        const all = await t.mem.listRecent(Infinity);
+        assert(all.filter((d) => d.folderPath === 'b.markdown').length === 1, 'no duplicate docs');
+    });
+
+    h.test('Close all in folder: docIds, removeDocs and closeFolder leave nothing of the folder', async () => {
+        const dir = sampleDir();
+        const t = await setup({dir});
+        await t.sync.openFolder();
+        const ids = t.sync.docIds(t.sync.list()[0].id);
+        assert(ids.length === 3, 'three docs');
+        assert(await t.manager.removeDocs(ids) === 3, 'removed three');
+        t.sync.closeFolder(t.sync.list()[0].id);
+        assert(t.sync.list().length === 0 && !t.sync.watching, 'folder gone, not watched');
+        for (const id of ids) assert(!(await t.mem.getDoc(id)), 'doc deleted');
+        assert(t.manager.currentId && !ids.includes(t.manager.currentId), 'another doc is open');
+        dir.add(fakeFile('four.md', '# Four'));
+        await t.sync.checkAll();
+        assert((await t.mem.listRecent(Infinity)).every((d) => !d.folderId), 'a closed folder adds nothing');
+    });
+
+    h.test('after a reload the folder comes back from the store and waits for permission before reading', async () => {
+        const dir = sampleDir();
+        const t = await setup({dir});
+        await t.sync.openFolder();
+        dir.permission = 'prompt';
+        const sync2 = fs.createFolderSync({
+            getDocManager: () => t.manager, getStore: () => t.mem, showDirectoryPicker: null,
+            timers: {setInterval: () => 1, clearInterval() {}},
+        });
+        assert(await sync2.load() === 1, 'one folder');
+        assert(sync2.list()[0].status === 'needs-permission', 'status ' + sync2.list()[0].status);
+        dir.add(fakeFile('later.md', '# Later'));
+        await sync2.checkAll();
+        assert(sync2.list()[0].docs.length === 3, 'no read without permission');
+        assert(await sync2.reconnect(sync2.list()[0].id) === 'ok' && dir.asked === 1, 'reconnect asks once');
+        assert(sync2.list()[0].status === 'ok' && sync2.list()[0].docs.length === 4, 'then catches up');
+    });
+
+    h.test('the file and depth limits are kept and reported', async () => {
+        const deep = fakeDir('l1', {'x.md': fakeFile('x.md', '# X'), l2: fakeDir('l2', {'y.md': fakeFile('y.md', '# Y')})});
+        const r = await fs.scanDirectory(fakeDir('top', {'a.md': fakeFile('a.md', '# A'), l1: deep}), {maxDepth: 1});
+        assert(JSON.stringify([...r.keys()]) === '["a.md","l1/x.md"]' && r.truncated, 'depth: ' + JSON.stringify([...r.keys()]));
+        const many = {};
+        for (let i = 0; i < 5; i++) many['f' + i + '.md'] = fakeFile('f' + i + '.md', '# F');
+        const r2 = await fs.scanDirectory(fakeDir('many', many), {maxFiles: 3});
+        assert(r2.size === 3 && r2.truncated, 'files: ' + r2.size);
+        const r3 = await fs.scanDirectory(sampleDir());
+        assert(!r3.truncated, 'skipped hidden folders do not count as truncated');
+    });
+
+    h.test('a startup with no folder ever opened reads no stored docs', async () => {
+        const t = await setup({dir: sampleDir()});
+        let reads = 0;
+        const spy = {...t.mem, async listRecent(...a) { reads++; return t.mem.listRecent(...a); }};
+        const sync2 = fs.createFolderSync({getDocManager: () => t.manager, getStore: () => spy, showDirectoryPicker: null,
+            timers: {setInterval: () => 1, clearInterval() {}}});
+        assert(await sync2.load() === 0 && reads === 0, 'no read');
+    });
+
+    h.test('no picker: openFolder says the browser cannot open folders', async () => {
+        const t = await setup({picker: false});
+        assert(await t.sync.openFolder() === 'unsupported', 'unsupported');
+        assert(/cannot open folders/.test(t.notes[0][0]), 'told');
+    });
+
+    h.test('an empty file from a folder is not dropped when the user moves to another doc', async () => {
+        const dir = fakeDir('empty', {'a.md': fakeFile('a.md', ''), 'b.md': fakeFile('b.md', '# B')});
+        const t = await setup({dir});
+        await t.sync.openFolder();
+        const a = t.sync.list()[0].docs.find((d) => d.folderPath === 'a.md');
+        assert(t.manager.currentId === a.id, 'a.md open');
+        await t.manager.switchTo(t.sync.list()[0].docs[1].id);
+        assert(await t.mem.getDoc(a.id), 'empty folder doc kept');
+        // A plain empty doc is still dropped on leaving, as before.
+        await t.manager.newDoc('');
+        const blank = t.manager.currentId;
+        await t.manager.switchTo(a.id);
+        assert(!(await t.mem.getDoc(blank)), 'plain empty doc dropped');
+    });
+
+    // -- Default folders: restore, snapshot, reconnectAll ---------------------
+    h.test('restore: a default folder the browser allows is read and listed without changing the open doc', async () => {
+        const t = await setup({dir: sampleDir()});
+        const startId = t.manager.currentId;
+        const notes = fakeDir('notes', {'n.md': fakeFile('n.md', '# N')});
+        const r = await t.sync.restore([{name: 'notes', handle: notes}]);
+        assert(JSON.stringify(r) === JSON.stringify({opened: 1, waiting: 0, already: 0, skipped: 0}), JSON.stringify(r));
+        assert(JSON.stringify(titlesIn(t.sync)) === '["notes:n.md"]', JSON.stringify(titlesIn(t.sync)));
+        assert(t.manager.currentId === startId && t.opened.length === 0, 'the open doc stays');
+        assert(t.notes.length === 0, 'no toast for a quiet restore: ' + JSON.stringify(t.notes));
+        assert(t.sync.watching, 'watched');
+    });
+
+    h.test('restore: a folder that needs access again is listed with no files until Reconnect reads it', async () => {
+        const t = await setup({dir: sampleDir()});
+        const notes = fakeDir('notes', {'n.md': fakeFile('n.md', '# N'), 'm.md': fakeFile('m.md', '# M')});
+        notes.permission = 'prompt';
+        const r = await t.sync.restore([{name: 'notes', handle: notes}]);
+        assert(r.waiting === 1 && r.opened === 0, JSON.stringify(r));
+        const f = t.sync.list()[0];
+        assert(f.name === 'notes' && f.status === 'needs-permission' && f.docs.length === 0, JSON.stringify(f));
+        assert(notes.asked === 0, 'no permission asked without a click');
+        // Closing an unrelated doc does not drop the waiting folder.
+        t.sync.forgetDocs(['nothing-here']);
+        assert(t.sync.list().length === 1, 'still listed');
+        assert(await t.sync.reconnect(f.id) === 'ok', 'reconnect');
+        assert(JSON.stringify(titlesIn(t.sync)) === '["notes:m.md,n.md"]', JSON.stringify(titlesIn(t.sync)));
+        assert(t.sync.list()[0].status === 'ok', 'ok after reconnect');
+    });
+
+    h.test('restore: a folder already listed is left alone, and a missing handle is skipped', async () => {
+        const dir = sampleDir();
+        const t = await setup({dir});
+        await t.sync.openFolder();
+        const before = t.sync.list()[0].docs.length;
+        const r = await t.sync.restore([{name: 'book', handle: dir}, {name: 'gone', handle: null}, {name: 'file', handle: fakeFile('x.md', '')}]);
+        assert(JSON.stringify(r) === JSON.stringify({opened: 0, waiting: 0, already: 1, skipped: 2}), JSON.stringify(r));
+        assert(t.sync.list().length === 1 && t.sync.list()[0].docs.length === before, 'no copies');
+    });
+
+    h.test('snapshot lists the open folders by name with their handles; reconnectAll asks each waiting folder in turn', async () => {
+        const t = await setup({dir: sampleDir()});
+        const b = fakeDir('beta', {'b.md': fakeFile('b.md', '# B')});
+        const a = fakeDir('alpha', {'a.md': fakeFile('a.md', '# A')});
+        const c = fakeDir('gamma', {'c.md': fakeFile('c.md', '# C')});
+        b.permission = 'prompt';
+        a.permission = 'prompt';
+        c.permission = 'prompt';
+        c.grantOnAsk = false;
+        await t.sync.restore([{name: 'beta', handle: b}, {name: 'alpha', handle: a}, {name: 'gamma', handle: c}]);
+        const snap = t.sync.snapshot();
+        assert(JSON.stringify(snap.map((f) => f.name)) === '["alpha","beta","gamma"]', JSON.stringify(snap.map((f) => f.name)));
+        assert(snap[0].handle === a && snap[1].handle === b, 'handles kept');
+        const r = await t.sync.reconnectAll();
+        assert(JSON.stringify(r) === JSON.stringify({ok: 2, denied: 1}), JSON.stringify(r));
+        assert(a.asked === 1 && b.asked === 1 && c.asked === 1, 'each asked once');
+        assert(JSON.stringify(t.sync.list().map((f) => f.name + ':' + f.status)) === '["alpha:ok","beta:ok","gamma:needs-permission"]',
+            JSON.stringify(t.sync.list().map((f) => f.name + ':' + f.status)));
+    });
+
+    h.test('hasUnsavedWork: browser-only text and edited disk copies count, clean disk copies do not', async () => {
+        const t = await setup({dir: sampleDir()});
+        await t.sync.openFolder();
+        const docs = await t.mem.listRecent(Infinity);
+        const clean = docs.find((d) => d.folderPath === 'one.md');
+        const local = docs.find((d) => !d.folderId);
+        assert(!t.manager.hasUnsavedWork(clean), 'clean disk copy');
+        assert(t.manager.hasUnsavedWork(local), 'browser-only doc');
+        assert(t.manager.hasUnsavedWork({...clean, snapshot: '# changed'}), 'edited disk copy');
+    });
+
+    h.run();
+</script>
+</body>
+</html>

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Page Layout Tests</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 0.85rem; }
+        tr.fail { background: #fff0f0; }
+        td:last-child { font-family: monospace; color: #666; }
+        iframe { width: 1400px; height: 800px; border: 0; }
+    </style>
+</head>
+<body>
+<h1>js/page-layout.js: the continuous page's height, the split, fit to size and its lower bound, widest</h1>
+<p id="summary">Running…</p>
+<table><tbody id="results"></tbody></table>
+<div id="result" hidden></div>
+<!--
+  Each test writes a print document (js/print-document.js) into a frame, as the editor's print
+  window gets one, and runs applyPageLayout on it with simulatePrint, as js/pdf-export.js does:
+  the print rules apply while it measures, then the screen rules come back. The PDF API runs the
+  same function in emulated print (server/test/page-control.test.mjs checks the PDFs).
+-->
+<script type="module">
+    import {createHarness, assert} from './lib/harness.js';
+    import {buildPrintDocument} from '../js/print-document.js';
+    import {normalizeExportOpts} from '../js/export-options.js';
+
+    const layoutMod = await import('../js/page-layout.js').catch(() => ({}));
+    const h = createHarness('PAGELAYOUT', {timeoutMs: 15000});
+    const MM_PX = 96 / 25.4;
+
+    // A cover rule and a manual page break, as templates and documents have them.
+    const TEMPLATE_CSS = `.template-t { font: 16px/1.5 sans-serif; }
+@media print { .template-t .cover-page { min-height: var(--bd-page-height, 297mm); break-after: page; } }
+.template-t .cover-page { background: #345; color: #fff; padding: 10mm; }`;
+
+    const paragraphs = (n) => Array.from({length: n}, (_, i) => `<p>Paragraph ${i + 1} of the document, long enough to wrap onto a second line in a column of normal width.</p>`).join('');
+    /** A table of n columns of one long unbreakable word each. */
+    const wideTable = (n) => `<table><thead><tr>${Array.from({length: n}, (_, i) => `<th>Heading${i}</th>`).join('')}</tr></thead>`
+        + `<tbody><tr>${Array.from({length: n}, (_, i) => `<td>Unbreakable${i}word</td>`).join('')}</tr></tbody></table>`;
+
+    /** A print document in a fresh frame; resolves with the frame's document once it has loaded. */
+    async function frameWith(opts, bodyHTML, {coverHTML = ''} = {}) {
+        const frame = document.createElement('iframe');
+        frame.title = 'print document under test';
+        document.body.appendChild(frame);
+        const html = buildPrintDocument({title: 'T', templateId: 't', templateCSS: TEMPLATE_CSS, fontCSS: '', bodyHTML, coverHTML,
+            pageOpts: opts});
+        const doc = frame.contentDocument;
+        doc.open();
+        doc.write(html);
+        doc.close();
+        await new Promise((r) => setTimeout(r, 50));
+        return {frame, doc, done: () => frame.remove()};
+    }
+
+    /** applyPageLayout's input from page options, as js/pdf-export.js builds it (pageLayoutInput). */
+    const input = (doc, o, extra = {}) => ({...layoutMod.pageLayoutInput(o), doc, ...extra});
+    /** The print rules on while it measures, as js/pdf-export.js runs it; the screen rules back after. */
+    const run = (doc, o, extra) => {
+        const flipped = layoutMod.simulatePrintMedia(doc);
+        try {
+            return layoutMod.applyPageLayout(input(doc, o, extra));
+        } finally {
+            layoutMod.restoreMedia(flipped);
+        }
+    };
+    const layoutStyle = (doc) => (doc.getElementById('bd-page-layout') || {}).textContent || '';
+
+    h.test('the module is there', () => {
+        assert(typeof layoutMod.applyPageLayout === 'function', 'applyPageLayout exported');
+    });
+
+    h.test('continuous: one page as tall as the laid-out content, written into @page; the screen rules come back', async () => {
+        const o = normalizeExportOpts({layout: 'continuous', margin: '15mm'});
+        const f = await frameWith(o, paragraphs(80));
+        try {
+            const r = run(f.doc, o);
+            assert(r.pages === 1, 'one page: ' + JSON.stringify(r));
+            assert(r.contentHeightMm > 400, 'eighty paragraphs are taller than an A4 page: ' + r.contentHeightMm);
+            assert(r.pageHeightMm >= r.contentHeightMm && r.pageHeightMm - r.contentHeightMm < 1, `the page fits the content: ${r.pageHeightMm} for ${r.contentHeightMm}`);
+            assert(r.pageWidthMm === 210, 'the chosen width');
+            assert(layoutStyle(f.doc).includes(`size: 210mm ${r.pageHeightMm}mm`), 'written: ' + layoutStyle(f.doc));
+            assert(f.doc.documentElement.style.width === '', 'the measuring width is taken off');
+            assert(f.doc.defaultView.getComputedStyle(f.doc.body).paddingTop === '24px', 'the screen rules are back');
+            assert(r.advisories.length === 0 && r.warnings.length === 0, 'nothing to say: ' + JSON.stringify(r));
+        } finally {
+            f.done();
+        }
+    });
+
+    h.test('continuous: the cover is the first block, as tall as its content, not a page', async () => {
+        const o = normalizeExportOpts({layout: 'continuous'});
+        const f = await frameWith(o, paragraphs(3), {coverHTML: '<div class="cover-page"><h1>Cover</h1></div>'});
+        try {
+            const r = run(f.doc, o);
+            assert(r.pages === 1, 'one page');
+            assert(r.contentHeightMm < 150, 'cover and three paragraphs are short, not a page plus: ' + r.contentHeightMm);
+        } finally {
+            f.done();
+        }
+    });
+
+    h.test('continuous: a cover laid out against the page (a size container) gets the chosen page\'s height, not nothing', async () => {
+        const o = normalizeExportOpts({pageSize: 'Slide', layout: 'continuous'});
+        const css = '<style>.template-t .cover-page.pinned { position: relative; container-type: size; height: var(--bd-page-height, 297mm); }'
+            + '.template-t .pinned span { position: absolute; left: 10cqw; top: 40%; }</style>';
+        const f = await frameWith(o, paragraphs(2), {coverHTML: `${css}<div class="cover-page pinned"><span>Deck cover</span></div>`});
+        try {
+            const r = run(f.doc, o);
+            const cover = f.doc.querySelector('.cover-page');
+            const flipped = layoutMod.simulatePrintMedia(f.doc);
+            f.doc.documentElement.style.width = `${254 * MM_PX}px`;
+            const heightMm = cover.getBoundingClientRect().height / MM_PX;
+            f.doc.documentElement.style.width = '';
+            layoutMod.restoreMedia(flipped);
+            assert(Math.abs(heightMm - 142.9) < 0.5, 'the Slide page height: ' + heightMm);
+            assert(r.contentHeightMm > 142.9, 'and counted in the page: ' + r.contentHeightMm);
+        } finally {
+            f.done();
+        }
+    });
+
+    h.test('continuous: a document longer than one page can be is split into the fewest tall pages, with a note', async () => {
+        const o = normalizeExportOpts({layout: 'continuous'});
+        const f = await frameWith(o, paragraphs(120));
+        try {
+            // A lower page limit stands in for 5080 mm, so the test stays small.
+            const r = run(f.doc, o, {maxSideMm: 300});
+            const fewest = Math.ceil(r.contentHeightMm / 300);
+            assert(r.pages >= fewest && r.pages <= fewest + 1, `pages ${r.pages} for ${r.contentHeightMm} mm`);
+            assert(r.pageHeightMm <= 300, 'each within the limit: ' + r.pageHeightMm);
+            assert(r.pageHeightMm * r.pages >= r.contentHeightMm, 'the pages hold it all');
+            assert(r.advisories.some((a) => /split into \d+ pages/.test(a) && /300 mm/.test(a)), JSON.stringify(r.advisories));
+            assert(!r.tooLong, 'not too long');
+        } finally {
+            f.done();
+        }
+    });
+
+    h.test('continuous: longer than the total limit is reported as too long', async () => {
+        const o = normalizeExportOpts({layout: 'continuous'});
+        const f = await frameWith(o, paragraphs(60));
+        try {
+            const r = run(f.doc, o, {maxSideMm: 100, maxTotalMm: 200});
+            assert(r.tooLong === true, JSON.stringify(r));
+        } finally {
+            f.done();
+        }
+    });
+
+    h.test('fit width: a table wider than the column is scaled down to it, and the note says by how much', async () => {
+        const o = normalizeExportOpts({fit: 'width'});
+        const f = await frameWith(o, '<p>Before.</p>' + wideTable(7) + '<p>After.</p>');
+        try {
+            const r = run(f.doc, o);
+            assert(r.scaled.length === 1 && r.scaled[0].label === 'Table 1', JSON.stringify(r.scaled));
+            const pct = r.scaled[0].percent;
+            assert(pct >= 40 && pct < 100, 'scaled between the bound and 100: ' + pct);
+            assert(r.advisories.some((a) => a === `Table 1 is scaled to ${pct}% to fit the page width.`), JSON.stringify(r.advisories));
+            const table = f.doc.querySelector('table');
+            assert(Number(table.style.zoom) > 0 && Number(table.style.zoom) < 1, 'zoomed: ' + table.style.zoom);
+            // Laid out as print again at the column width: it fits now.
+            const flipped = layoutMod.simulatePrintMedia(f.doc);
+            f.doc.documentElement.style.width = `${(210 - 40) * MM_PX}px`;
+            const col = f.doc.querySelector('.bd-page:not(.bd-page-cover) > .template-t').getBoundingClientRect();
+            const right = table.getBoundingClientRect().right;
+            f.doc.documentElement.style.width = '';
+            layoutMod.restoreMedia(flipped);
+            assert(right <= col.right + 1, `fits: ${right} within ${col.right}`);
+        } finally {
+            f.done();
+        }
+    });
+
+    h.test('fit width: under the lower bound a block is left at full size, with a warning', async () => {
+        const o = normalizeExportOpts({fit: 'width'});
+        const f = await frameWith(o, wideTable(60));
+        try {
+            const r = run(f.doc, o);
+            assert(r.scaled.length === 0, 'not scaled');
+            assert(!f.doc.querySelector('table').style.zoom, 'no zoom');
+            assert(r.warnings.length === 1 && /^Table 1 needs \d+% to fit the page width; under the 40% limit it is left at full size/.test(r.warnings[0]),
+                JSON.stringify(r.warnings));
+        } finally {
+            f.done();
+        }
+    });
+
+    h.test('fit off: nothing is touched and nothing is written', async () => {
+        const o = normalizeExportOpts({});
+        const f = await frameWith(o, wideTable(14));
+        try {
+            const r = run(f.doc, o);
+            assert(r.scaled.length === 0 && r.warnings.length === 0 && r.advisories.length === 0, JSON.stringify(r));
+            assert(!f.doc.querySelector('table').style.zoom, 'no zoom');
+            assert(layoutStyle(f.doc) === '', 'no page rule on pages');
+        } finally {
+            f.done();
+        }
+    });
+
+    h.test('widest: the continuous page is widened to the widest block, which is then not scaled', async () => {
+        const o = normalizeExportOpts({layout: 'continuous', fit: 'widest'});
+        const f = await frameWith(o, paragraphs(2) + wideTable(14));
+        try {
+            const r = run(f.doc, o);
+            assert(r.pageWidthMm > 210, 'wider: ' + r.pageWidthMm);
+            assert(r.scaled.length === 0, 'nothing scaled: ' + JSON.stringify(r.scaled));
+            assert(r.advisories.some((a) => a === `The page is ${r.pageWidthMm} mm wide to fit Table 1.`), JSON.stringify(r.advisories));
+            assert(layoutStyle(f.doc).includes(`size: ${r.pageWidthMm}mm ${r.pageHeightMm}mm`), layoutStyle(f.doc));
+            assert(layoutStyle(f.doc).includes(`--bd-page-width: ${r.pageWidthMm}mm`), 'the page variable follows');
+        } finally {
+            f.done();
+        }
+    });
+
+    h.test('widest: never wider than the page limit; what is still too wide is scaled', async () => {
+        const o = normalizeExportOpts({layout: 'continuous', fit: 'widest'});
+        const f = await frameWith(o, wideTable(14));
+        try {
+            const r = run(f.doc, o, {maxSideMm: 250});
+            assert(r.pageWidthMm === 250, 'the limit: ' + r.pageWidthMm);
+            assert(r.scaled.length === 1, 'then scaled: ' + JSON.stringify(r));
+        } finally {
+            f.done();
+        }
+    });
+
+    h.test('the editor\'s print window: exportPDF writes the continuous page and fit before print, and returns the notes', async () => {
+        const pdfExport = await import('../js/pdf-export.js');
+        const frame = document.createElement('iframe');
+        frame.title = 'print window under test';
+        document.body.appendChild(frame);
+        const win = frame.contentWindow;
+        let printedWith = null;
+        win.print = () => { printedWith = (win.document.getElementById('bd-page-layout') || {}).textContent || ''; };
+        try {
+            const pageOpts = normalizeExportOpts({layout: 'continuous', fit: 'width', margin: '10mm'});
+            const prepared = {doc: {title: 'T'}, bodyHTML: paragraphs(30) + wideTable(7), coverHTML: '', pageOpts, print: {}};
+            const r = await pdfExport.exportPDF(prepared, {manifest: {id: 't'}, styles: TEMPLATE_CSS},
+                {openWindow: () => win, fontCSS: '', confirmPrint: () => true});
+            assert(r.printed, 'printed');
+            assert(/^@page \{ size: 210mm [\d.]+mm; margin: 0; \}$/.test(printedWith.split('\n')[0]), 'written before print: ' + printedWith);
+            assert(r.notes.some((n) => /^Table 1 is scaled to \d+%/.test(n)), JSON.stringify(r.notes));
+            assert(win.document.defaultView.getComputedStyle(win.document.body).paddingTop === '24px', 'the screen rules are back');
+        } finally {
+            frame.remove();
+        }
+    });
+
+    h.test('tiny pages: the page count is estimated, and past the limit the print window asks first', async () => {
+        const o = normalizeExportOpts({pageSize: '30x30mm', margin: '5mm'});
+        const f = await frameWith(o, paragraphs(60));
+        try {
+            const flipped = layoutMod.simulatePrintMedia(f.doc);
+            const n = layoutMod.estimatePages({...layoutMod.pageLayoutInput(o), doc: f.doc});
+            layoutMod.restoreMedia(flipped);
+            assert(n > 60 && n < 2000, 'sixty paragraphs on 20 x 20 mm of text: ' + n);
+            assert(f.doc.documentElement.style.width === '', 'the measuring width is taken off');
+        } finally {
+            f.done();
+        }
+        const pdfExport = await import('../js/pdf-export.js');
+        const frame = document.createElement('iframe');
+        frame.title = 'print window under test';
+        document.body.appendChild(frame);
+        const win = frame.contentWindow;
+        let asked = '';
+        let printed = false;
+        win.print = () => { printed = true; };
+        try {
+            const prepared = {doc: {title: 'T'}, bodyHTML: paragraphs(60), coverHTML: '', pageOpts: o, print: {}};
+            const r = await pdfExport.exportPDF(prepared, {manifest: {id: 't'}, styles: TEMPLATE_CSS},
+                {openWindow: () => win, fontCSS: '', maxPages: 50, confirmPrint: (w, message) => { asked = message; return false; }});
+            assert(/would print about [\d,]+ pages at this page size/.test(asked), 'asked: ' + asked);
+            assert(!printed && !r.printed, 'not printed after Cancel');
+        } finally {
+            frame.remove();
+        }
+    });
+
+    h.test('the media rules come back exactly as they were', async () => {
+        const o = normalizeExportOpts({});
+        const f = await frameWith(o, '<p>x</p>');
+        try {
+            const texts = () => Array.from(f.doc.styleSheets).flatMap((s) => Array.from(s.cssRules))
+                .filter((rule) => rule.media).map((rule) => rule.media.mediaText);
+            const before = texts();
+            const flipped = layoutMod.simulatePrintMedia(f.doc);
+            assert(flipped.length >= 2 && !texts().includes('print'), 'flipped: ' + texts());
+            layoutMod.restoreMedia(flipped);
+            assert(JSON.stringify(texts()) === JSON.stringify(before), texts().join(' | '));
+        } finally {
+            f.done();
+        }
+    });
+
+    h.run();
+</script>
+</body>
+</html>
