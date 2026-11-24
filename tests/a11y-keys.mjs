@@ -426,13 +426,13 @@ export async function runA11yKeys({log = console.log, shotsDir = null, groups = 
                 const rest = order.slice(nav.length + fmtCount);
                 // A fresh profile has no default folders saved: the one-line hint offers to load them from a file.
                 const want = ['sidebar-toggle', 'sidebar-new', 'sidebar-open', 'sidebar-open-folder', 'sidebar-close-all',
-                    'menu-folders-trigger', 'folder-notice-action', 'folder-notice-close', 'doc-filter', 'doc-open:Gamma', 'doc-del:Gamma', 'editor'];
+                    'menu-folders-trigger', 'folder-notice-action', 'folder-notice-close', 'doc-filter', 'doc-open:Gamma', 'doc-del:Gamma', 'sidebar-resizer', 'editor'];
                 assert(JSON.stringify(rest) === JSON.stringify(want), 'sidebar then editor (one stop per list): ' + JSON.stringify(rest));
             });
 
             await check('focus ring: keyboard focus shows a 2px outline on toolbar, sidebar and editor', async () => {
                 const ring = (sel) => s.evalExpr(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); el.focus(); const cs = getComputedStyle(el); return {style: cs.outlineStyle, width: parseFloat(cs.outlineWidth), color: cs.outlineColor}; })()`);
-                for (const sel of ['#btn-new', '#template-select', '[data-fmt="bold"]', '#doc-filter', '#doc-list .doc-item.active .doc-open', '#editor', '#divider', '#preview-pane']) {
+                for (const sel of ['#btn-new', '#template-select', '[data-fmt="bold"]', '#doc-filter', '#doc-list .doc-item.active .doc-open', '#editor', '#divider', '#sidebar-resizer', '#preview-pane']) {
                     const r = await ring(sel);
                     assert(r.style !== 'none' && r.width >= 2, `${sel} ring: ${JSON.stringify(r)}`);
                 }
@@ -452,7 +452,27 @@ export async function runA11yKeys({log = console.log, shotsDir = null, groups = 
                 await s.evalExpr("document.getElementById('editor').focus(), true");
                 await press(s, 'Escape');
                 await press(s, 'Tab', {shift: true});
-                assert(/^doc-del:/.test(await s.focus()), 'Escape, Shift+Tab moves back to the sidebar, got ' + await s.focus());
+                assert(await s.focus() === 'sidebar-resizer', 'Escape, Shift+Tab moves back to the sidebar edge, got ' + await s.focus());
+            });
+
+            await check('sidebar: the edge is a separator; arrows, Home and End resize it, double-click resets, the width is kept', async () => {
+                // The width the sidebar is set to (its box eases there over .15s, so it is not measured).
+                const width = () => s.evalExpr("parseInt(getComputedStyle(document.getElementById('sidebar')).getPropertyValue('--sidebar-width'), 10)");
+                const now = () => s.evalExpr("Number(document.getElementById('sidebar-resizer').getAttribute('aria-valuenow'))");
+                await s.evalExpr("document.getElementById('sidebar-resizer').focus(), true");
+                assert(await now() === 220 && await width() === 220, 'starts at 220px, got ' + await width());
+                await press(s, 'ArrowRight');
+                assert(await now() === 240 && await width() === 240, 'ArrowRight widens by 20px, got ' + await width());
+                await press(s, 'ArrowRight', {shift: true});
+                assert(await now() === 320, 'Shift+ArrowRight widens by 80px, got ' + await now());
+                assert(await s.evalExpr("localStorage.getItem('printmd-sidebar-width')") === '320', 'the width is remembered');
+                await press(s, 'Home');
+                assert(await now() === 160 && await width() === 160, 'Home goes to the 160px minimum, got ' + await width());
+                await press(s, 'End');
+                const max = await s.evalExpr("Number(document.getElementById('sidebar-resizer').getAttribute('aria-valuemax'))");
+                assert(await now() === max && max <= 600 && max >= 160, 'End goes to the maximum, got ' + await now() + ' of ' + max);
+                await s.evalExpr("document.getElementById('sidebar-resizer').dispatchEvent(new MouseEvent('dblclick', {bubbles: true})), true");
+                assert(await now() === 220 && await width() === 220, 'double-click resets to 220px, got ' + await width());
             });
 
             await check('sidebar: roles and names in the accessibility tree', async () => {

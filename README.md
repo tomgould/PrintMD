@@ -137,6 +137,8 @@ port, so the service accepts requests addressed to that port too.
   folder is watched. Files added, edited or removed outside PrintMD are added, reloaded or closed within a few seconds.
   Each section and subfolder loads closed and opens with a click, and **Close all** on its heading closes that folder's files. **Close all** at the top of the sidebar closes everything. Closing a file never touches it on disk;
   documents whose changes exist only in the browser ask first.
+- The sidebar is as wide as you need: drag its right edge (or focus the edge and use the arrow keys) so long file
+  names fit, and double-click the edge to go back to the default width. Hovering a file shows its whole name.
 - Default folders (Defaults... in the sidebar, or Ctrl+K): **Save open folders as defaults** and PrintMD opens the same
   folders on every start, after a browser restart too (if the browser asks for access again, click **Reconnect** on
   each folder or **Reconnect all**). Clearing the browser's site data removes them, so **Save defaults to file...**

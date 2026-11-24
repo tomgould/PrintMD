@@ -22,7 +22,7 @@ import {createPreflightDialog} from './preflight-dialog.js';
 import {openModal} from './dialog-a11y.js';
 import {createEditorFormat} from './editor-format.js';
 import {appCommands, createCommandPalette} from './palette.js';
-import {createSidebar, initSidebarCollapse} from './sidebar.js';
+import {createSidebar, initSidebarCollapse, initSidebarResize} from './sidebar.js';
 import {copyText} from './copy-text.js';
 import {initKeyboardShortcuts, isMacPlatform, newDocShortcutLabel, recentShortcutLabel} from './shortcuts.js';
 import {
@@ -1732,6 +1732,7 @@ function wireUI() {
     if (skip) skip.addEventListener('click', (e) => { e.preventDefault(); editor.focus(); });
 
     initSidebarCollapse({sidebar: byId('sidebar'), toggle: byId('sidebar-toggle')});
+    initSidebarResize({sidebar: byId('sidebar'), handle: byId('sidebar-resizer')});
 
     // Storage-unavailable banner: shown by startStorage, stays until dismissed.
     const bannerClose = byId('storage-banner-close');

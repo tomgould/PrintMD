@@ -222,6 +222,10 @@
         <ul aria-label="Recent files" id="doc-list"></ul>
         <!-- Shown while older documents (or more matches) remain: js/sidebar.js -->
         <button class="btn-mini doc-more" hidden type="button">Show more</button>
+        <!-- Drag (or arrow keys) to widen the sidebar so long file names fit; double-click resets: js/sidebar.js -->
+        <div aria-controls="sidebar" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemax="600"
+             aria-valuemin="160" aria-valuenow="220" aria-valuetext="Sidebar 220 pixels" id="sidebar-resizer"
+             role="separator" tabindex="0" title="Drag to resize, double-click to reset"></div>
     </nav>
     <main id="editor-pane">
       <textarea

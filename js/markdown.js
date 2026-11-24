@@ -116,7 +116,7 @@ export const APP_ELEMENT_IDS = Object.freeze([
     'menu-folders-list', 'menu-folders-trigger', 'menu-import-trigger', 'menu-more-list', 'menu-more-trigger', 'menu-view-list', 'menu-view-trigger',
     'page-options-modal', 'page-options-modal-title', 'password-modal', 'password-modal-input', 'password-modal-message', 'password-modal-title', 'pdf-input',
     'po-custom', 'po-error', 'po-fit', 'po-height', 'po-layout-continuous', 'po-layout-paged', 'po-margin', 'po-margin-unit',
-    'po-note', 'po-unit', 'po-width', 'preflight-modal', 'preflight-modal-list', 'preflight-modal-message', 'preflight-modal-title', 'preview', 'preview-pane', 'read-time', 'sidebar', 'sidebar-close-all', 'sidebar-new', 'sidebar-open', 'sidebar-open-folder', 'sidebar-toggle', 'storage-banner',
+    'po-note', 'po-unit', 'po-width', 'preflight-modal', 'preflight-modal-list', 'preflight-modal-message', 'preflight-modal-title', 'preview', 'preview-pane', 'read-time', 'sidebar', 'sidebar-close-all', 'sidebar-new', 'sidebar-open', 'sidebar-open-folder', 'sidebar-resizer', 'sidebar-toggle', 'storage-banner',
     'storage-banner-close', 'template-info-body', 'template-info-close', 'template-info-popover', 'template-select',
     'template-styles', 'toast', 'toolbar-format', 'toolbar-nav', 'word-count',
 ]);

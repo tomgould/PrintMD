@@ -27,6 +27,8 @@
 import {safeGet, safeSet, safeRemove} from './safe-storage.js';
 
 const SIDEBAR_KEY = 'printmd-sidebar-collapsed';
+const SIDEBAR_WIDTH_KEY = 'printmd-sidebar-width';
+const WIDTH_DEFAULT = 220, WIDTH_MIN = 160, WIDTH_MAX = 600, WIDTH_STEP = 20, WIDTH_BIG_STEP = 80;
 // Where older versions remembered opened folders across reloads: cleared, as folders now load closed.
 const OLD_FOLDER_KEYS = ['printmd-folder-collapsed', 'printmd-folder-expanded'];
 const PAGE_SIZE = 50;
@@ -307,6 +309,7 @@ export function createSidebar({list, filter, more = null, editor, getStore, curr
         const sep = document.createElement('span'); sep.className = 'visually-hidden'; sep.textContent = ', ';
         const time = document.createElement('span'); time.className = 'doc-time'; time.textContent = formatRelTime(d.lastOpenedAt || d.updatedAt);
         open.append(title, sep, time);
+        open.title = title.textContent;   // the whole name, when the row cuts it short
         const del = document.createElement('button');
         del.type = 'button';
         del.className = 'doc-del';
@@ -732,5 +735,71 @@ export function initSidebarCollapse({sidebar, toggle}) {
         const c = !sidebar.classList.contains('collapsed');
         setCollapsed(c);
         safeSet(SIDEBAR_KEY, c ? '1' : '0');
+    });
+}
+
+/**
+ * The sidebar's width: drag its right edge (or focus the edge and use Left/Right,
+ * Shift for bigger steps, Home/End for the limits) so long file names fit.
+ * Double-click the edge to go back to the default. Remembered in localStorage.
+ * The width never takes more than half the window, so the panes keep room.
+ */
+export function initSidebarResize({sidebar, handle}) {
+    const limit = () => Math.max(WIDTH_MIN, Math.min(WIDTH_MAX, Math.floor(window.innerWidth / 2)));
+    const clamp = (px) => Math.round(Math.min(limit(), Math.max(WIDTH_MIN, px)));
+    const setWidth = (px) => {
+        const w = clamp(px);
+        sidebar.style.setProperty('--sidebar-width', w + 'px');
+        handle.setAttribute('aria-valuemax', String(limit()));
+        handle.setAttribute('aria-valuenow', String(w));
+        handle.setAttribute('aria-valuetext', `Sidebar ${w} pixels`);
+        return w;
+    };
+    const current = () => Number(handle.getAttribute('aria-valuenow')) || WIDTH_DEFAULT;
+    const save = (w) => safeSet(SIDEBAR_WIDTH_KEY, String(w));
+    const stored = Number(safeGet(SIDEBAR_WIDTH_KEY));
+    setWidth(Number.isFinite(stored) && stored > 0 ? stored : WIDTH_DEFAULT);
+
+    let dragging = false, dragged = null;
+    handle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        dragging = true;
+        e.preventDefault();
+        sidebar.classList.add('resizing');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        dragged = setWidth(e.clientX - sidebar.getBoundingClientRect().left);
+    });
+    document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        sidebar.classList.remove('resizing');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        if (dragged != null) save(dragged);   // once, when the drag ends
+        dragged = null;
+    });
+    handle.addEventListener('dblclick', () => save(setWidth(WIDTH_DEFAULT)));
+    handle.addEventListener('keydown', (e) => {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const step = e.shiftKey ? WIDTH_BIG_STEP : WIDTH_STEP;
+        let next;
+        switch (e.key) {
+            case 'ArrowLeft': next = current() - step; break;
+            case 'ArrowRight': next = current() + step; break;
+            case 'Home': next = WIDTH_MIN; break;
+            case 'End': next = limit(); break;
+            default: return;
+        }
+        e.preventDefault();
+        save(setWidth(next));
+    });
+    // A narrower window shrinks a wide sidebar to fit (the saved width is kept for a wider one).
+    window.addEventListener('resize', () => {
+        const want = Number(safeGet(SIDEBAR_WIDTH_KEY)) || WIDTH_DEFAULT;
+        setWidth(want);
     });
 }

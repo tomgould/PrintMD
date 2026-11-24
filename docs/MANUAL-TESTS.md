@@ -24,7 +24,7 @@ check when you run it.
 | [D10](#d10-copy-html-over-plain-http) | Copy HTML over plain http, with a real clipboard |
 | [D11](#d11-a-tab-on-an-older-version-blocks-the-upgrade) | A tab on an older version blocks the database upgrade |
 | [D12](#d12-each-document-keeps-its-settings) | Each document keeps its template, size, orientation and format through a reload and a new browser session |
-| [D13](#d13-the-split-theme-view-and-sidebar-are-remembered) | The split, theme, view and sidebar are remembered through a reload and a new browser session |
+| [D13](#d13-the-split-theme-view-and-sidebar-are-remembered) | The split, theme, view, sidebar and its width are remembered through a reload and a new browser session |
 | [D14](#d14-open-a-folder-and-keep-it-up-to-date) | Open a folder with the real folder picker; files added, edited and removed outside |
 | [D15](#d15-close-all-and-close-all-in-folder) | Close all and Close all in folder |
 | [D16](#d16-full-width-preview) | Full width preview |
@@ -207,6 +207,8 @@ browser. Use a port this browser has never opened the app on, so its database do
 4. Make the window narrow, about 900 px, and reload. **Expected:** both panes are still visible.
 5. In the DevTools console run `localStorage.setItem('printmd-split', 'oops')` and reload. **Expected:** a 50/50
    split and no error.
+6. Drag the sidebar's right edge until a long file name shows in full, then reload. **Expected:** the same sidebar
+   width. Double-click the edge. **Expected:** the default width again.
 
 ### D14. Open a folder and keep it up to date
 
